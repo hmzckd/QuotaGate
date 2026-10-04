@@ -1,0 +1,6 @@
+# Apply after compose.yaml and compose.qg05.yaml in the isolated QG-06 project.
+services:
+  api:
+    command: ["serve-combined"]
+  api-2:
+    command: ["serve-combined"]

@@ -1,0 +1,5 @@
+.env
+.env.compose
+*.exe
+coverage.out
+.cache/

@@ -1,0 +1,68 @@
+name: quotagate
+
+x-db-url: &db-url postgres://quotagate:${QG_DB_PASSWORD:?Set QG_DB_PASSWORD in .env.compose}@db:5432/quotagate?sslmode=disable
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: quotagate
+      POSTGRES_DB: quotagate
+      POSTGRES_PASSWORD: ${QG_DB_PASSWORD:?Set QG_DB_PASSWORD in .env.compose}
+    ports:
+      - "127.0.0.1:${QG_DB_PORT:-55432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quotagate -d quotagate"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+
+  migrate:
+    build: .
+    environment:
+      DATABASE_URL: *db-url
+    command: ["migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: *db-url
+      ADMIN_TOKEN: ${QG_ADMIN_TOKEN:?Set QG_ADMIN_TOKEN in .env.compose}
+      HTTP_ADDR: :8080
+    ports:
+      - "127.0.0.1:${QG_HTTP_PORT:-18080}:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+
+  example-api:
+    build:
+      context: .
+      target: example-api
+    environment:
+      QUOTAGATE_URL: http://api:8080
+      HTTP_ADDR: :8081
+    ports:
+      - "127.0.0.1:${QG_EXAMPLE_PORT:-18081}:8081"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health/live"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+
+volumes:
+  pgdata:
