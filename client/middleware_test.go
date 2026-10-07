@@ -42,6 +42,8 @@ func TestMiddlewareDecisionOutcomes(t *testing.T) {
 		{"bad client request", 400, `{"error":"secret from upstream"}`, 503},
 		{"conflict", 409, `{"error":"secret from upstream"}`, 503},
 		{"storage outage", 503, `{"error":"secret from upstream"}`, 503},
+		{"bad gateway", 502, "secret from upstream", 503},
+		{"gateway timeout", 504, "secret from upstream", 503},
 		{"server error", 500, "secret from upstream", 503},
 		{"malformed decision", 200, `{"allowed":true`, 503},
 		{"missing permission", 200, strings.Replace(allowedBody, `"allowed":true,`, "", 1), 503},
@@ -84,7 +86,11 @@ func TestMiddlewareDecisionOutcomes(t *testing.T) {
 			if tc.want == http.StatusCreated {
 				wantCalls = 1
 			}
-			if handlerCalls != wantCalls || upstreamCalls.Load() != 1 {
+			wantUpstream := int64(1)
+			if tc.status == 502 || tc.status == 503 || tc.status == 504 {
+				wantUpstream = 3
+			}
+			if handlerCalls != wantCalls || upstreamCalls.Load() != wantUpstream {
 				t.Fatalf("handler calls = %d, upstream calls = %d", handlerCalls, upstreamCalls.Load())
 			}
 			if strings.Contains(w.Body.String(), "secret from upstream") || strings.Contains(w.Body.String(), testKey) {

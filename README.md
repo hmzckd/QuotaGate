@@ -1,11 +1,11 @@
 # QuotaGate
 
-QuotaGate, çok müşterili bir Go uygulamasının **isteği çalıştırmadan önce** müşteri ve işlem için izin kararı almasını sağlayan dar kapsamlı bir servis çalışmasıdır. Hedef, Go ile API sınırları, eşzamanlı kota güncellemesi, tekrar deneme ve bağımlılık arızası davranışını gösteren yerel bir portföy demosudur. QG-01–04 kalıcı günlük kota ve middleware kullanan örnek API'yi, QG-05 ayrı Redis hız ön kontrolünü, QG-06 birleşik hız/günlük kararını içerir. Sınırlı istemci tekrarı, kesintiden toparlanma demosu ve performans ölçümü sonraki görevlerdedir.
+QuotaGate, çok müşterili bir Go uygulamasının **isteği çalıştırmadan önce** müşteri ve işlem için izin kararı almasını sağlayan dar kapsamlı bir servis çalışmasıdır. Hedef, Go ile API sınırları, eşzamanlı kota güncellemesi, tekrar deneme ve bağımlılık arızası davranışını gösteren yerel bir portföy demosudur. QG-01–04 kalıcı günlük kota ve middleware kullanan örnek API'yi, QG-05 ayrı Redis hız ön kontrolünü, QG-06 birleşik hız/günlük kararını, QG-07 sınırlı istemci tekrarını, QG-08 iki kopyalı gerçek bağımlılık kesintisi ve toparlanmayı içerir. **v0.1 ve v0.2 kabulü tamamlandı**; gözlemlenebilirlik ve performans ölçümü v0.3 görevlerindedir.
 
 ## İstek akışı
 
 1. Müşteri, kendi QuotaGate anahtarıyla örnek API'de `POST /jobs` çağırır.
-2. Örnek API'deki middleware her **gelen istek** için yeni bir karar kimliği üretir ve `operation=job.create` için `POST /v1/decisions` çağırır. v0.1'de tek çağrı vardır; aynı kimlikle sınırlı taşıma tekrarı QG-07'de eklenecek.
+2. Örnek API'deki middleware her **gelen istek** için yeni bir karar kimliği üretir ve `operation=job.create` için `POST /v1/decisions` çağırır. Geçici bağlantı/yanıt hatasında aynı kimlikle, toplam iki saniye içinde en fazla üç deneme yapar.
 3. QuotaGate anahtardan müşteriyi belirler. `serve-combined` modunda önce PostgreSQL'deki kayıtlı kararı arar; yeni kararda Redis hız kontrolünü, ardından PostgreSQL günlük kotasını değerlendirip nihai sonucu kaydeder.
 4. İzin verilirse örnek API handler'ı çalışır. Ret gelirse `429`, karar alınamazsa `503` döner ve handler çalışmaz. `GET /v1/usage` yalnızca anahtarın sahibinin kalıcı günlük kullanımını gösterir.
 
@@ -57,7 +57,7 @@ Günlük hak, izin kararı transaction'da kaydedilince ayrılır. Sonraki handle
 
 ## QG-04 middleware ve örnek API
 
-`client.New("http://127.0.0.1:18080")` ile oluşturulan Go istemcisi birden fazla müşterinin eşzamanlı isteklerinde paylaşılabilir. `decisions.Middleware("job.create", handler)` müşteri anahtarını gelen `Authorization: Bearer ...` header'ından alır; gelen gövdeyi tüketmeden QuotaGate'e tek çağrı yapar. Çağrı iki saniyeyle ve gelen isteğin iptaliyle sınırlıdır. Yönlendirmeler izlenmez; eksik, bozuk veya çelişkili karar yanıtı handler'ı çalıştırmaz. Uygulama kapanırken `decisions.Close()` boş bağlantıları kapatır.
+`client.New("http://127.0.0.1:18080")` ile oluşturulan Go istemcisi birden fazla müşterinin eşzamanlı isteklerinde paylaşılabilir. `decisions.Middleware("job.create", handler)` müşteri anahtarını gelen `Authorization: Bearer ...` header'ından alır; gelen gövdeyi tüketmeden QuotaGate kararı ister. İstemci aynı karar kimliği/gövde/anahtarla en fazla üç deneme yapar; toplam iki saniyelik bütçe ve gelen isteğin iptali tüm denemeleri ve beklemeleri kapsar. Yönlendirmeler izlenmez; eksik, bozuk veya çelişkili karar yanıtı handler'ı çalıştırmaz. Uygulama kapanırken `decisions.Close()` boş bağlantıları kapatır.
 
 Compose örnek API'yi `127.0.0.1:18081` üzerinde açar. `POST /jobs` izin halinde `201` ve süreç içinde numaralanmış `demo-N` iş kimliği verir. Kota reddi `429`, karar alınamaması `503`, geçersiz anahtar `401`, tanımsız işlem politikası `403` olur. Her izin handler'ı bir kez çalıştırır; diğer sonuçlarda handler çalışmaz. Gelen `Idempotency-Key` veya gövdedeki karar kimliği tekrar kullanımı sağlamaz: ayrı API isteği yeni karar ve hak talebidir.
 
@@ -125,4 +125,67 @@ QG-06 kendi `quotagate-qg06_pgdata` hacmini kullanır. Önceki demolarla aynı p
 
 Betik dört geçici müşteri oluşturur. İki kopyaya 60 benzersiz çağrı günlük limit `3`, hız limiti `7` ile `3 allowed / 4 daily_quota / 53 rate_limited` verir. Yirmi aynı kimlikli çağrı bir günlük/hız hakkı kullanır. Bir müşteri için geçici PostgreSQL constraint'i, Redis kontrolünden sonraki karar yazımını bozarak `503` ve korunmuş Redis kapasitesini gösterir; aynı kimlikle tekrar sonucu tamamlar. Örnek `/jobs` için hız ve günlük retleri `429` olur, handler yalnızca iki izin için çalışır. PostgreSQL kullanım/karar/izin/günlük ret/hız ret toplamı `6|67|6|6|55` ile uzlaştırılır; loglarda sır aranır. `finally` geçici constraint'i, yalnızca kendi müşterilerini ve Redis anahtarlarını temizler. Başka trafik olmayan izole ortamda çalıştırın.
 
-Birleşik entegrasyon testleri için migration uygulanmış izole PostgreSQL'i `QG_TEST_DATABASE_URL`, test Redis'ini `QG_TEST_REDIS_URL` ile verin. Her iki değişken varsa `go test ./... -count=1 -timeout=90s`, gerçek iki bağımlılıkta yarışları, Redis yanıt kaybını, PostgreSQL INSERT hatasında günlük artışın geri alınmasını, kalıcı tekrarın Redis'i atlamasını ve HTTP yanıt kaybını doğrular. Değişkenler eksikse ilgili entegrasyon testleri atlanır. Testler yalnızca rastgele oluşturdukları müşteri verisini temizler; hata enjeksiyonu kısa süreli, müşteriye özgü bir constraint eklediğinden paylaşılan/üretim veritabanında çalıştırmayın. İstemcinin otomatik taşıma tekrarı QG-07'de eklenecek.
+Birleşik entegrasyon testleri için migration uygulanmış izole PostgreSQL'i `QG_TEST_DATABASE_URL`, test Redis'ini `QG_TEST_REDIS_URL` ile verin. Her iki değişken varsa `go test ./... -count=1 -timeout=90s`, gerçek iki bağımlılıkta yarışları, Redis yanıt kaybını, PostgreSQL INSERT hatasında günlük artışın geri alınmasını, kalıcı tekrarın Redis'i atlamasını ve HTTP yanıt kaybını doğrular. Değişkenler eksikse ilgili entegrasyon testleri atlanır. Testler yalnızca rastgele oluşturdukları müşteri verisini temizler; hata enjeksiyonu kısa süreli, müşteriye özgü bir constraint eklediğinden paylaşılan/üretim veritabanında çalıştırmayın.
+
+## QG-07 sınırlı tekrar ve handler sınırı
+
+`Client.Decide`, tek karar çağrısında aynı `decision_id`, işlem, müşteri anahtarı ve gövdeyi korur. En fazla **üç deneme**, deneme başına **600 ms**, aralarda **50 ms / 100 ms** bekleme ve hepsini kapsayan **iki saniyelik toplam bütçe** vardır. Gelen bağlam daha erken sona ererse bütçeyi kısaltır. Bekleme ve yanıt gövdesi okuma da bütçeye dahildir; deneme sayısı veya bütçe dolunca `503` ve çalışmayan handler sonucu alınır.
+
+| Sonuç | Tekrar |
+| --- | --- |
+| Bağlantı kopması, EOF/yarım HTTP gövdesi, deneme timeout'u | Bütçe ve deneme sayısı kaldıysa aynı kimlikle |
+| HTTP `502`, `503`, `504` | Bütçe ve deneme sayısı kaldıysa aynı kimlikle |
+| Nihai `allowed`, `daily_quota`, `rate_limited` | Yok; handler veya `429` |
+| HTTP `401`, `403`, `409`, diğer HTTP durumları ve yönlendirme | Yok |
+| TLS doğrulama hatası, bozuk/çelişkili/eksik/4096 bayttan büyük karar | Yok; handler çalışmaz |
+| Gelen bağlamın iptali veya toplam bütçenin bitmesi | Yok; handler çalışmaz |
+
+İlk deneme PostgreSQL'e commit edip yanıtını kaybettiyse tekrar kalıcı kararı bulur; günlük ve Redis hakkı tekrar harcanmaz. Bütün yanıtlar kaybolursa handler çalışmadan `503` dönebilir, fakat kalıcı hak ayrılmış olabilir. Aynı karar kimliğiyle manuel tekrar ilk sonucu gösterir. Ayrı bir `POST /jobs`, aynı gövde ve `Idempotency-Key` header'ına sahip olsa da yeni karar kimliği üretir; QuotaGate handler yan etkilerini tekilleştirmez. Bu sürümde her deneme aynı servis adresine gider; kopyalar arası failover istemcide uygulanmıyor.
+
+Yerel Go araç zinciriyle iki Compose kopyasına karşı kabul:
+
+```powershell
+docker compose -p quotagate-qg07 --env-file .env.compose -f compose.yaml -f compose.qg05.yaml -f compose.qg06.yaml up --build -d --wait
+# Host Go modül önbelleği ilk kez hazırlanacaksa: go mod download
+pwsh -NoProfile -File ./scripts/smoke-qg07.ps1
+docker compose -p quotagate-qg07 --env-file .env.compose -f compose.yaml -f compose.qg05.yaml -f compose.qg06.yaml down
+```
+
+QG-07 ayrı `quotagate-qg07_pgdata` hacmi kullanır; önceki demolarla aynı portları kullandığından sırayla çalıştırın. Betik iki gerçek Compose API kopyasını kullanır; **hostta çalışan test proxy'si ve örnek API handler'ı**, commit edilmiş yanıtı düşürür veya bekletir. Üretim servisine hata enjeksiyonu ucu eklenmez. Proxy bu testte denemeleri iki kopyaya sırayla iletir; istemci tek proxy adresini görür. Bu test, servis adresi failover'ı veya gerçek bağımlılık kesintisinden toparlanma kanıtı değildir; kesinti demosu QG-08'dedir.
+
+Kabul dört geçici müşteride ilk yanıt kaybından toparlanmayı, bütün yanıtların kaybında üç denemede kapanmayı, manuel kalıcı tekrarı, farklı inbound kimliklerini, kısa caller deadline'ını ve toplam iki saniyelik bütçeyi doğrular. `/demo/stats` handler sayacı ve her müşteri için PostgreSQL kullanım/karar/izin sayıları ile Redis kapasitesi uzlaştırılır. Test, yalnızca kendi müşteri/Redis verisini ve yerel test sunucularını temizler; betik uygulama loglarında sır arar ve test env değerlerini eski haline getirir.
+
+`go test ./client -count=1` bağlantı/gövde kaybı, `502/503/504`, timeout/iptal, terminal cevaplar ve 30 eşzamanlı inbound istekte 60 deneme/30 ayrı karar kimliğini doğrular. `QG_TEST_DATABASE_URL` ve `QG_TEST_REDIS_URL` varsa `TestExampleRetryAfterCommitWithPostgres`, gerçek iki bağımlılığa bağlı handler ile commit sonrası kaybı test eder. `TestQG07ComposeRetry` ise ayrıca iki `QG_TEST_API_URL`/`QG_TEST_API_URL_2` ve `QG_TEST_ADMIN_TOKEN` ister; betik bunları bellekte ayarlar. Canlı Compose testi Redis DB `0`, genel entegrasyon/race koşusu izole test DB `15` kullanır.
+
+## QG-08 iki kopyalı kesinti ve toparlanma
+
+`compose.qg08.yaml`, iki `serve-combined` kopyasını aynı PostgreSQL ve Redis'e bağlar; örnek API birinci kopyayı kullanır. Temel Compose dosyası üzerine tek ek yeterlidir:
+
+```powershell
+docker compose -p quotagate-qg08 --env-file .env.compose -f compose.yaml -f compose.qg08.yaml up --build -d --wait
+pwsh -NoProfile -File ./scripts/smoke-qg08.ps1
+docker compose -p quotagate-qg08 --env-file .env.compose -f compose.yaml -f compose.qg08.yaml down
+```
+
+QG-08 ayrı `quotagate-qg08_pgdata` hacmini kullanır. Varsayılan portlar QuotaGate `18080/18082`, örnek API `18081`, PostgreSQL `55432`, Redis `56379`; hepsi loopback üzerinden açılır. Önceki demolarla aynı portları kullandığından ortamları sırayla çalıştırın. **Boş, izole test PostgreSQL/Redis'i ve başka trafik olmayan ortamı kullanın.** Betik başlangıçta müşteri/sayaç/karar tablolarının ve Redis demo DB'sinin boş olduğunu kontrol eder. Redis durdurulup başlatılacağı için bu ortamda başka veri tutulmamalıdır.
+
+Üç geçici müşteriyle ortak limitler ve toparlanma sınanır:
+
+| Müşteri | Günlük / dakika limiti | İki kopyaya eşzamanlı çağrı | Beklenen nihai sonuç |
+| --- | --- | --- | --- |
+| Ortak hız | `1000 / 7` | `60` benzersiz karar | `7 allowed / 53 rate_limited` |
+| Ortak günlük kota | `3 / 1000` | `40` benzersiz karar | `3 allowed / 37 daily_quota` |
+| Toparlanma | `4 / 1000` | Örnek API ve doğrudan kararlar | Kesintilerde handler çalışmaz; toparlanınca günlük kullanım `4` olur |
+
+Yük iki QuotaGate kopyasına dönüşümlü dağıtılır. Hız testi gerçek Redis dakika penceresinde çalışır; günlük kota PostgreSQL'de paylaşılır. Sonra betik yalnızca bağımlılık konteynerlerini durdurup başlatır:
+
+| Kesinti | İki kopyada live / ready | Yeni karar ve örnek `/jobs` | Kayıtlı kararın tekrarı | Handler ve kalıcı sayaçlar |
+| --- | --- | --- | --- | --- |
+| Redis kapalı | `200 / 503` | `503` | PostgreSQL'den `200`, ilk sonuç korunur | Artmaz |
+| PostgreSQL kapalı | `200 / 503` | `503` | `503` | Artmaz; DB geri gelince önceki kayıtlar korunur |
+
+Redis bu demoda disk kalıcılığı olmadan çalışır. Yeniden başlatma hız sayaçlarını ve ön sonuçları kaybettirir. PostgreSQL'deki nihai kararın tekrarı Redis'i doldurmaz; yeni karar yeniden hız kapasitesi kullanır. Bu kabul hız verisinin kesinti boyunca korunmasını vaat etmez. PostgreSQL **çağrılardan önce tamamen durdurulduğunda** kimlik doğrulama başarısız olur ve yeni Redis ön sonucu oluşmaz. Redis kontrolünden sonra yaşanan DB hatasında kapasite tüketilmiş olabilir; bu ayrı hata noktası QG-06 kabulünde doğrulandı.
+
+İki bağımlılık geri geldiğinde readiness ve yeni kararlar toparlanır. Betik iki QuotaGate kopyasının ve örnek API'nin konteyner kimliği, başlangıç zamanı ve restart sayısını karşılaştırarak uygulamalar yeniden başlatılmadan bağlantıların toparlandığını doğrular. Son günlük kullanım müşteri bazında `7/3/4`; PostgreSQL kullanım/karar/izin/günlük ret/hız ret/farklı kimlik toplamı `14|105|14|38|53|105` olur. Örnek API handler'ı üç izin için `+3` çalışır; son günlük kota reddi `429` verir. Doğrudan karar izinleri handler çağrısı değildir.
+
+Betik loglarda müşteri anahtarlarını, yönetici sırrını ve DB parolasını arar. `finally` durdurduğu bağımlılıkları geri getirir, yalnızca oluşturduğu müşteri verisini ve Redis anahtarlarını temizler. `down` PostgreSQL hacmini korur. Bu yerel demo üretim HA veya otomatik failover kanıtı değildir. Birim, gerçek bağımlılık, race ve canlı Compose kabul sonuçları [STATUS.md](STATUS.md) içindedir; sıradaki görev QG-09 gözlemlenebilir kararlardır.

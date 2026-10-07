@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,12 +29,16 @@ type HTTPError struct{ StatusCode int }
 func (e *HTTPError) Error() string { return "QuotaGate returned a non-success status" }
 
 type Client struct {
-	endpoint  string
-	http      *http.Client
-	transport *http.Transport
+	endpoint       string
+	http           *http.Client
+	transport      *http.Transport
+	timeout        time.Duration
+	attemptTimeout time.Duration
+	retryDelay     time.Duration
 }
 
-// New creates a client with a two-second timeout and no redirects or retries.
+// New creates a client with up to three attempts inside one two-second budget.
+// Each attempt has a 600ms deadline; retry delays are 50ms then 100ms.
 // A single client may be shared by concurrent requests from different customers.
 func New(baseURL string) (*Client, error) {
 	u, err := url.Parse(baseURL)
@@ -46,8 +51,11 @@ func New(baseURL string) (*Client, error) {
 	transport.MaxConnsPerHost = 20
 	transport.MaxIdleConnsPerHost = 10
 	return &Client{
-		endpoint:  u.String(),
-		transport: transport,
+		endpoint:       u.String(),
+		transport:      transport,
+		timeout:        2 * time.Second,
+		attemptTimeout: 600 * time.Millisecond,
+		retryDelay:     50 * time.Millisecond,
 		http: &http.Client{
 			Transport: transport,
 			Timeout:   2 * time.Second,
@@ -61,8 +69,12 @@ func New(baseURL string) (*Client, error) {
 // Close releases idle connections. Active requests retain their own deadlines.
 func (c *Client) Close() { c.transport.CloseIdleConnections() }
 
-// Decide makes one request. The caller owns the decision ID and any future retry.
+// Decide retries transport failures and HTTP 502/503/504 with the same ID/body.
+// The caller's context can shorten the overall budget. Final decisions, other
+// HTTP statuses and invalid decision bodies are never retried.
 func (c *Client) Decide(ctx context.Context, key, decisionID, operation string) (Decision, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
 	body, err := json.Marshal(struct {
 		DecisionID string `json:"decision_id"`
 		Operation  string `json:"operation"`
@@ -70,24 +82,68 @@ func (c *Client) Decide(ctx context.Context, key, decisionID, operation string) 
 	if err != nil {
 		return Decision{}, errors.New("cannot encode decision request")
 	}
+	for attempt := range 3 {
+		if ctx.Err() != nil {
+			return Decision{}, errors.New("QuotaGate decision budget exhausted")
+		}
+		attemptCtx, stop := context.WithTimeout(ctx, c.attemptTimeout)
+		decision, err, retry := c.decideAttempt(attemptCtx, key, body)
+		stop()
+		if ctx.Err() != nil {
+			return Decision{}, errors.New("QuotaGate decision budget exhausted")
+		}
+		if err == nil || !retry || attempt == 2 {
+			return decision, err
+		}
+		timer := time.NewTimer(c.retryDelay * time.Duration(attempt+1))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return Decision{}, errors.New("QuotaGate decision budget exhausted")
+		case <-timer.C:
+		}
+	}
+	return Decision{}, errors.New("QuotaGate decision unavailable")
+}
+
+func (c *Client) decideAttempt(ctx context.Context, key string, body []byte) (Decision, error, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return Decision{}, errors.New("cannot create decision request")
+		return Decision{}, errors.New("cannot create decision request"), false
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return Decision{}, errors.New("QuotaGate request unavailable")
+		return Decision{}, errors.New("QuotaGate request unavailable"), retryableTransportError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return Decision{}, &HTTPError{StatusCode: resp.StatusCode}
+		retry := resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout
+		return Decision{}, &HTTPError{StatusCode: resp.StatusCode}, retry
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 4097))
-	if err != nil || len(data) > 4096 {
-		return Decision{}, errors.New("cannot read QuotaGate decision")
+	if err != nil {
+		return Decision{}, errors.New("cannot read QuotaGate decision"), retryableTransportError(err)
 	}
+	if len(data) > 4096 {
+		return Decision{}, errors.New("cannot read QuotaGate decision"), false
+	}
+	decision, err := decodeDecision(data)
+	return decision, err, false
+}
+
+func retryableTransportError(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var networkError net.Error
+	var operationError *net.OpError
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		(errors.As(err, &networkError) && networkError.Timeout()) || errors.As(err, &operationError)
+}
+
+func decodeDecision(data []byte) (Decision, error) {
 	// Pointers distinguish missing fields from an explicit false or zero value.
 	var wire struct {
 		Allowed       *bool  `json:"allowed"`
