@@ -1,6 +1,6 @@
 # QuotaGate
 
-QuotaGate, çok müşterili bir Go uygulamasının **isteği çalıştırmadan önce** müşteri ve işlem için izin kararı almasını sağlayan dar kapsamlı bir servis çalışmasıdır. Hedef, Go ile API sınırları, eşzamanlı kota güncellemesi, tekrar deneme ve bağımlılık arızası davranışını gösteren yerel bir portföy demosudur. QG-01–04 kalıcı günlük kota ve middleware kullanan örnek API'yi, QG-05 ayrı Redis hız ön kontrolünü, QG-06 birleşik hız/günlük kararını, QG-07 sınırlı istemci tekrarını, QG-08 iki kopyalı gerçek bağımlılık kesintisi ve toparlanmayı içerir. **v0.1 ve v0.2 kabulü tamamlandı**. QG-09 metrik ve correlation ID içeren logları ekler; timeout/veri ömrü ve performans ölçümü v0.3'ün sonraki görevleridir.
+QuotaGate, çok müşterili bir Go uygulamasının **isteği çalıştırmadan önce** müşteri ve işlem için izin kararı almasını sağlayan dar kapsamlı bir servis çalışmasıdır. Hedef, Go ile API sınırları, eşzamanlı kota güncellemesi, tekrar deneme ve bağımlılık arızası davranışını gösteren yerel bir portföy demosudur. QG-01–04 kalıcı günlük kota ve middleware kullanan örnek API'yi, QG-05 ayrı Redis hız ön kontrolünü, QG-06 birleşik hız/günlük kararını, QG-07 sınırlı istemci tekrarını, QG-08 iki kopyalı gerçek bağımlılık kesintisi ve toparlanmayı içerir. **v0.1 ve v0.2 kabulü tamamlandı**. QG-09 metrik ve correlation ID içeren logları, QG-10 zaman sınırlarını, düzenli kapanışı ve karar kayıtlarının saklama/temizlik komutunu ekler. Performans ölçümü v0.3'ün sonraki görevidir (QG-11).
 
 ## İstek akışı
 
@@ -234,3 +234,71 @@ docker compose -p quotagate-qg09 --env-file .env.compose -f compose.yaml -f comp
 ```
 
 Önceki demolarla aynı portlar kullanılır. Boş PostgreSQL/Redis, yeni API konteynerleri ve başka karar trafiği olmayan ortam gerekir. Betik üç geçici müşteri oluşturur; izin/hız/günlük ret/kalıcı tekrar, gerçek Redis ve PostgreSQL kesintileri, bağımlılık gauge'ları ve hata sınıfları, histogram örnekleri ve yanıt–JSON log correlation eşleşmesini kontrol eder. Caller header'ında yönetici sırrı ve tanınmayan URL'de müşteri/anahtar verisi göndererek telemetry'de bulunmadığını da doğrular. Yalnızca kendi müşteri/Redis verisini temizler ve durdurduğu bağımlılıkları geri getirir. Kabul sonuçları ve sonraki görev [STATUS.md](STATUS.md) içindedir.
+
+## QG-10 zaman sınırları, kapanış ve karar saklama
+
+### Zaman sınırları
+
+Her katmanın sınırı bir öncekinden biraz uzundur. Böylece içteki sınır önce dolar ve istemci yine anlamlı bir yanıt alır.
+
+| Katman | Sınır | Nerede |
+| --- | --- | --- |
+| Tek bağımlılık çağrısı | `3s` | `requestContext` (handler'lar) |
+| Bütün istek | `4s` | `withRequestBudget` (`internal/httpapi/budget.go`) |
+| Yanıt yazma | `5s` | `http.Server.WriteTimeout`; `ReadHeaderTimeout` ve `ReadTimeout` da `5s`, `IdleTimeout` `30s` |
+| Düzenli kapanış | `10s` | `shutdownTimeout` (`cmd/quotagate/main.go`) |
+
+İkinci katman, iki çağrının arka arkaya `3s` sürüp toplamda `6s` tutmasını engeller. `4s` bütçe `5s` yazma sınırının altında kalır, böylece geç kalan `503` yine istemciye ulaşır.
+
+Bağlam sınırı olmayan bir çağrı için de alt sınırlar vardır:
+
+- **PostgreSQL havuzu (`store.NewPool`):** en çok `10` bağlantı, bağlantı kurma `2s`. Sunucu tarafında `statement_timeout=5s` ve `idle_in_transaction_session_timeout=10s` oturum ayarı olarak gönderilir. Context biten sorguda pgx bağlantıyı kapatır; PostgreSQL bekleyen kilit isteğini bırakır ve havuz bağlantıyı geri alır. Sunucu ayarları, bağlam vermeyen ya da bağlantıyı kapatmadan kaybolan bir istemci için yedektir.
+- **Redis (`ratelimit.New`, QG-05'ten beri):** bağlanma, okuma, yazma ve havuz bekleme `1s`; otomatik tekrar yok; context süresine uyulur.
+
+Askıdaki bağımlılık davranışı: PostgreSQL'de müşteri satırı başka bir oturumda kilitliyken yeni karar `3s` sonra `503` döner, log satırında `postgres_error=true` görünür. Kilit kalkınca yeni karar uygulama yeniden başlatılmadan `200` döner. İstemci isteği iptal ederse işlem `1s` içinde biter ve bağlantı havuza döner.
+
+### Düzenli kapanış
+
+`SIGTERM` veya `Ctrl+C` gelince servis yeni bağlantı kabul etmeyi bırakır, devam eden istekleri `10s`'ye kadar bekler, sonra PostgreSQL havuzunu ve Redis istemcisini kapatır. Loglarda sırasıyla `shutdown started` ve `shutdown complete` görünür, süreç `0` koduyla çıkar. İstekler `4s` bütçeyle sınırlı olduğu için bekleme Docker'ın varsayılan `10s` durdurma süresine sığar. Örnek API de aynı şekilde kapanır.
+
+### Karar kayıtlarının ömrü
+
+| Veri | Nerede | Ne kadar kalır |
+| --- | --- | --- |
+| Hız ön sonucu (`qg:rate:…:decision:…`) | Redis | `24 saat` TTL; bu sürede aynı karar kimliğinin tekrarı hız kapasitesini ikinci kez harcamaz |
+| Hız penceresi sayacı (`qg:rate:…:bucket:…`) | Redis | Pencere bitince kendiliğinden silinir |
+| Kalıcı karar (`quotagate.decisions`) | PostgreSQL | Elle temizlenene kadar; komut en az `48 saat` tutar |
+| Günlük kullanım (`quotagate.daily_usage`) | PostgreSQL | Silinmez; müşteri+işlem+gün başına tek küçük satır |
+
+Kalıcı karar, aynı karar kimliğiyle gelen tekrarın ilk sonucu almasını sağlar. Erken silinirse geç gelen bir tekrar **yeni karar** sayılır ve günlük kotadan ikinci kez hak harcayabilir. Bu yüzden temizlik en az `48 saat` (tekrar penceresinin iki katı) eski kayıtlara dokunur ve bu alt sınır komut satırında değil `store.PruneDecisions` içinde zorunludur.
+
+Temizlik planlayıcı değil, elle çalıştırılan bir komuttur. Varsayılanı yalnızca sayar:
+
+```bash
+# Sadece say: 72 saatten eski kaç karar var?
+quotagate prune-decisions
+# Sınırı değiştir (en az 48h):
+quotagate prune-decisions -older-than 96h
+# Gerçekten sil:
+quotagate prune-decisions -older-than 72h -apply
+```
+
+Compose'da aynı komut `api` imajıyla çalışır:
+
+```powershell
+docker compose -p quotagate-qg01 --env-file .env.compose run --rm --no-deps api prune-decisions -older-than 72h
+```
+
+- Kesme anı PostgreSQL saatinden hesaplanır; uygulama sunucusunun saati kaymış olsa da 48 saat kuralı bozulmaz.
+- Silme `1000` satırlık parçalarla yapılır; uzun tek bir kilit tutulmaz. `0004_decision_retention.sql` bu sorgu için `created_at` index'i ekler.
+- `48h` altı, `-apply` yazımı yanlış veya fazladan argüman verilirse komut veritabanına hiç bağlanmadan hata verir.
+- Komut servisin `5s` `statement_timeout` sınırını kullanmaz; çok satırlı temizlik bu sınıra takılmaz. İptal için `Ctrl+C` yeterlidir, tamamlanmış parçalar silinmiş kalır.
+- Log satırı yalnızca `apply`, `older_than`, `cutoff`, `matched` ve `deleted` içerir.
+
+Karar kaydı silinince günlük kullanım değişmez, çünkü `GET /v1/usage` sayıyı `daily_usage` tablosundan okur.
+
+### Testler
+
+Bağımlılık URL'si verilmeden çalışan testler: sessiz PostgreSQL sunucusuna bağlanma `2s` içinde biter, sessiz Redis'e çağrı `1s` içinde biter, istek bütçesi uzun handler'ı keser, kapanış devam eden isteği bitirip yeni bağlantıyı reddeder, temizlik komutu güvensiz argümanları veritabanına gitmeden reddeder.
+
+`QG_TEST_DATABASE_URL` ve `QG_TEST_REDIS_URL` ile çalışan testler: kilitli satırda karar `503` döner ve iptal edilen istek bağlantı tutmaz; bağlamı olmayan yavaş sorgu `statement_timeout` ile `57014` hatası alır; 1, 47, 49 ve 100 saatlik kararlardan yalnızca 49 ve 100 saatlikler silinir, 47 saatlik kararın tekrarı ilk sonucu döner. Kabul sonuçları [STATUS.md](STATUS.md) içindedir.

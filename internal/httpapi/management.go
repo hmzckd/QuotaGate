@@ -57,7 +57,9 @@ func newAppHandler(db Pinger, customerStore CustomerStore, adminToken string, ra
 	if rate != nil {
 		mux.HandleFunc("POST /demo/rate-checks", m.rateCheck)
 	}
-	return o.wrap(mux)
+	// The budget wraps the observer, so the observer still reads r.Pattern
+	// from the same request the mux saw.
+	return withRequestBudget(o.wrap(mux))
 }
 
 func (m *management) adminOnly(next http.Handler) http.Handler {

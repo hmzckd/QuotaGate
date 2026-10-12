@@ -206,6 +206,8 @@ func (o *observation) wrap(mux *http.ServeMux) http.Handler {
 }
 
 // Never use URL paths, query strings, operation names or caller-supplied IDs.
+// This is an allowlist: when a new route is registered on the mux, add its
+// pattern here too, or its metrics and logs silently report "unmatched".
 func observedRoute(pattern string) string {
 	_, route, _ := strings.Cut(pattern, " ")
 	switch route {
