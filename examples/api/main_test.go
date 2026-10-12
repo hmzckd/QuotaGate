@@ -26,7 +26,7 @@ func TestExampleJobsAndHandlerEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(c.Close)
-	handler := newHandler(c)
+	handler := newHandler(quotaGuard(c))
 	call := func(method, path string, want int) *httptest.ResponseRecorder {
 		t.Helper()
 		r := httptest.NewRequest(method, path, nil)
@@ -52,4 +52,20 @@ func TestExampleJobsAndHandlerEvidence(t *testing.T) {
 	}
 	call("GET", "/jobs", 405)
 	call("GET", "/health/live", 200)
+}
+
+func TestBaselineHandlerRunsWithoutDecision(t *testing.T) {
+	handler := newHandler(func(next http.Handler) http.Handler { return next })
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest("POST", "/jobs", nil)) // no key: nothing checks it
+		if w.Code != http.StatusCreated {
+			t.Fatalf("baseline /jobs status = %d, want 201", w.Code)
+		}
+	}
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest("GET", "/demo/stats", nil))
+	if strings.TrimSpace(w.Body.String()) != `{"handler_calls":2}` {
+		t.Fatalf("baseline handler count: %s", w.Body.String())
+	}
 }

@@ -1,6 +1,6 @@
 # QuotaGate
 
-QuotaGate, çok müşterili bir Go uygulamasının **isteği çalıştırmadan önce** müşteri ve işlem için izin kararı almasını sağlayan dar kapsamlı bir servis çalışmasıdır. Hedef, Go ile API sınırları, eşzamanlı kota güncellemesi, tekrar deneme ve bağımlılık arızası davranışını gösteren yerel bir portföy demosudur. QG-01–04 kalıcı günlük kota ve middleware kullanan örnek API'yi, QG-05 ayrı Redis hız ön kontrolünü, QG-06 birleşik hız/günlük kararını, QG-07 sınırlı istemci tekrarını, QG-08 iki kopyalı gerçek bağımlılık kesintisi ve toparlanmayı içerir. **v0.1 ve v0.2 kabulü tamamlandı**. QG-09 metrik ve correlation ID içeren logları, QG-10 zaman sınırlarını, düzenli kapanışı ve karar kayıtlarının saklama/temizlik komutunu ekler. Performans ölçümü v0.3'ün sonraki görevidir (QG-11).
+QuotaGate, çok müşterili bir Go uygulamasının **isteği çalıştırmadan önce** müşteri ve işlem için izin kararı almasını sağlayan dar kapsamlı bir servis çalışmasıdır. Hedef, Go ile API sınırları, eşzamanlı kota güncellemesi, tekrar deneme ve bağımlılık arızası davranışını gösteren yerel bir portföy demosudur. QG-01–04 kalıcı günlük kota ve middleware kullanan örnek API'yi, QG-05 ayrı Redis hız ön kontrolünü, QG-06 birleşik hız/günlük kararını, QG-07 sınırlı istemci tekrarını, QG-08 iki kopyalı gerçek bağımlılık kesintisi ve toparlanmayı içerir. **v0.1 ve v0.2 kabulü tamamlandı**. QG-09 metrik ve correlation ID içeren logları, QG-10 zaman sınırlarını, düzenli kapanışı ve karar kayıtlarının saklama/temizlik komutunu ekler. QG-11, ara katmanın eklediği gecikmeyi tekrarlanabilir bir yükle ölçer ve kararları PostgreSQL ile uzlaştırır.
 
 ## İstek akışı
 
@@ -302,3 +302,52 @@ Karar kaydı silinince günlük kullanım değişmez, çünkü `GET /v1/usage` s
 Bağımlılık URL'si verilmeden çalışan testler: sessiz PostgreSQL sunucusuna bağlanma `2s` içinde biter, sessiz Redis'e çağrı `1s` içinde biter, istek bütçesi uzun handler'ı keser, kapanış devam eden isteği bitirip yeni bağlantıyı reddeder, temizlik komutu güvensiz argümanları veritabanına gitmeden reddeder.
 
 `QG_TEST_DATABASE_URL` ve `QG_TEST_REDIS_URL` ile çalışan testler: kilitli satırda karar `503` döner ve iptal edilen istek bağlantı tutmaz; bağlamı olmayan yavaş sorgu `statement_timeout` ile `57014` hatası alır; 1, 47, 49 ve 100 saatlik kararlardan yalnızca 49 ve 100 saatlikler silinir, 47 saatlik kararın tekrarı ilk sonucu döner. Kabul sonuçları [STATUS.md](STATUS.md) içindedir.
+
+## QG-11 yük ve doğruluk raporu
+
+`cmd/qgload`, aynı sabit tohumlu yükü önce **ara katmansız** örnek API'ye (taban), sonra **QuotaGate ara katmanlı** örnek API'ye gönderir. İki koşu arasındaki gecikme farkı ara katmanın maliyetidir. QuotaGate koşusunun her yanıtı PostgreSQL kayıtlarıyla karşılaştırılır.
+
+Hedef, ölçümden önce [PLAN.md](PLAN.md#qg-11--yük-ve-doğruluk-raporu) içinde yazıldı ve araç bunu raporun başına koyar: **50 istek/sn, 5 dakika, en çok 20 eşzamanlı istek, p95 ek gecikme < 30 ms**. Hedef tutmasa da rapor yazılır; yanlış veya eksik karar ise koşuyu başarısız yapar (çıkış kodu `1`).
+
+### Yük
+
+| Müşteri | Pay | Günlük limit | Dakika limiti | Beklenen |
+| --- | ---: | ---: | ---: | --- |
+| 8 açık müşteri | %70 | 1.000.000.000 | 1.000.000 | Hepsine izin |
+| 1 günlük müşteri | %15 | 500 | 1.000.000 | Tam 500 izin, gerisi `daily_quota` |
+| 1 hız müşterisi | %15 | 1.000.000.000 | 120 | Her dakika penceresinde en çok 120 izin, gerisi `rate_limited` |
+
+- **Sabit tohum (`-seed 11`):** her isteğin hangi müşteriye gideceği tohumdan üretilir. Aynı tohum aynı sırayı verir; iki koşu ve sonraki tekrarlar aynı yükü gönderir.
+- **Açık döngü:** istek `i`, başlangıçtan `i/50` saniye sonra gönderilir; yavaş yanıt sonraki istekleri geciktirmez. Gecikme, isteğin **planlanan** gönderim anından yanıtın sonuna kadar ölçülür. Boş işçi bekleyen istek bu bekleyişi de gecikmesine katar (coordinated omission'a karşı).
+- **Isınma:** her hedefe önce 10 saniyelik ölçülmeyen yük gider, yalnızca açık müşterilere. Isınma kararları doğruluk kontrolüne dahildir.
+- Örnek API'nin taban modu `QUOTAGATE_MIDDLEWARE=off` ile açılır ve yalnızca ölçüm içindir: her `/jobs` isteği handler'ı çalıştırır, başlangıçta uyarı loglanır. Varsayılan `on`.
+
+### Doğruluk kontrolleri
+
+QuotaGate koşusunda (ısınma dahil) şunların hepsi tutmalı:
+
+- Her istek `201` ya da bilinen bir `429` (`daily_quota`, `rate_limited`) aldı; `503` veya bağlantı hatası yok.
+- Örnek API handler'ı `201` sayısı kadar çalıştı (`/demo/stats` farkı).
+- Her müşteri için PostgreSQL'deki karar kaydı sayısı gönderilen istek sayısına eşit; izin, `daily_quota` ve `rate_limited` kayıtları yanıtlarla aynı; `daily_usage` izin sayısına eşit.
+- Açık müşterilerin hepsine izin; günlük müşteriye tam 500 izin.
+- Hız müşterisi: Redis dakika pencereleri saate bağlı. İstemcinin gönderme/yanıt zamanlarından, `1s` saat payıyla, kesin bir pencereye düşen istekler için en az `min(120, istek)` izin; dokunulan her pencere için en çok `120` izin.
+
+### Çalıştırma
+
+Compose'da (QG-08 topolojisi ve ayrı taban örnek API'si):
+
+```powershell
+docker compose -p quotagate-qg11 --env-file .env.compose -f compose.yaml -f compose.qg08.yaml -f compose.qg11.yaml up --build -d --wait
+go run ./cmd/qgload -compose-env .env.compose -note "Docker Desktop Compose, <bilgisayar>" -report reports/qg11-compose.md
+docker compose -p quotagate-qg11 --env-file .env.compose -f compose.yaml -f compose.qg08.yaml -f compose.qg11.yaml down
+```
+
+Araç yönetici sırrını ve veritabanı parolasını `.env.compose` dosyasından okur, komut satırına yazdırmaz. `-compose-env` yerine `ADMIN_TOKEN` ve `DATABASE_URL` ortam değişkenleri de verilebilir. Varsayılan adresler: QuotaGate `18080`, korumalı örnek API `18081`, taban örnek API `18083`; `-quotagate`, `-guarded`, `-baseline` ile değişir. Koşu yaklaşık 11 dakika sürer. Başlamadan önce araç şunları denetler: QuotaGate hazır mı, korumalı API anahtarsız isteği `401` ile reddediyor mu, taban API anahtarsız isteği `201` ile kabul ediyor mu, koşu UTC gece yarısını geçecek mi (günlük kota sıfırlanırdı).
+
+Araç kendi oluşturduğu 10 test müşterisini koşu sonunda siler (`-keep` ile bırakılır). Politikaları, kararları ve günlük kullanımları da `ON DELETE CASCADE` ile gider. Redis anahtarları kendi süreleriyle silinir. Başka trafik olmayan ortamda çalıştırın: handler sayacı süreç geneli.
+
+Çıktı: Markdown rapor ve yanında aynı adla `.json` (ham sayılar). Raporda commit, Go sürümü, işletim sistemi, CPU, ayarlar, iki koşunun p50/p95/p99/max değerleri, ek gecikme, hedefin sonucu, müşteri bazında karar sayıları ve her kontrolün sonucu bulunur.
+
+### Sınır
+
+Yük üreticisi, iki örnek API, QuotaGate, PostgreSQL ve Redis aynı makinede çalışır; sonuç ara katmanı aynı koşullardaki kendi tabanıyla karşılaştırır. Üretim kapasitesi, HA veya genel p95 SLA iddiası değildir. Tek koşu tek ölçümdür; kuyruk değerleri (p99, max) koşudan koşuya oynar. Ölçüm sonuçları [STATUS.md](STATUS.md) ve [reports/](reports/) içindedir.

@@ -235,7 +235,7 @@ func runRetryAcceptance(t *testing.T, deps retryDependencies, origins []string, 
 			t.Fatal(err)
 		}
 		t.Cleanup(decisions.Close)
-		return newHandler(decisions), fault
+		return newHandler(quotaGuard(decisions)), fault
 	}
 	callExample := func(handler http.Handler, key string, ctx context.Context, want int) {
 		t.Helper()

@@ -33,16 +33,27 @@ func run() error {
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		return errors.New("HTTP_ADDR must be host:port")
 	}
-	decisions, err := client.New(os.Getenv("QUOTAGATE_URL"))
-	if err != nil {
-		return err
+	var guard func(http.Handler) http.Handler
+	switch os.Getenv("QUOTAGATE_MIDDLEWARE") {
+	case "", "on":
+		decisions, err := client.New(os.Getenv("QUOTAGATE_URL"))
+		if err != nil {
+			return err
+		}
+		defer decisions.Close()
+		guard = quotaGuard(decisions)
+	case "off":
+		// Load-test baseline only (QG-11): the same handler without a decision call.
+		slog.Warn("QuotaGate middleware disabled; every /jobs request runs the handler")
+		guard = func(next http.Handler) http.Handler { return next }
+	default:
+		return errors.New(`QUOTAGATE_MIDDLEWARE must be "on" or "off"`)
 	}
-	defer decisions.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           newHandler(decisions),
+		Handler:           newHandler(guard),
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      5 * time.Second,
 		IdleTimeout:       30 * time.Second,
@@ -67,7 +78,13 @@ func run() error {
 	}
 }
 
-func newHandler(decisions *client.Client) http.Handler {
+func quotaGuard(decisions *client.Client) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler { return decisions.Middleware("job.create", next) }
+}
+
+// newHandler wraps POST /jobs with guard: the QuotaGate middleware, or nothing
+// for the load-test baseline.
+func newHandler(guard func(http.Handler) http.Handler) http.Handler {
 	var calls atomic.Int64
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +94,7 @@ func newHandler(decisions *client.Client) http.Handler {
 	mux.HandleFunc("GET /demo/stats", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]int64{"handler_calls": calls.Load()})
 	})
-	mux.Handle("POST /jobs", decisions.Middleware("job.create", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /jobs", guard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count := calls.Add(1)
 		writeJSON(w, http.StatusCreated, struct {
 			JobID        string `json:"job_id"`

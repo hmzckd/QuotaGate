@@ -1,0 +1,475 @@
+{
+  "started_at": "2026-10-12T15:17:43.423387886Z",
+  "finished_at": "2026-10-12T15:28:03.400782079Z",
+  "settings": {
+    "quotagate_url": "http://127.0.0.1:18080",
+    "guarded_url": "http://127.0.0.1:18081",
+    "baseline_url": "http://127.0.0.1:18083",
+    "rate": 50,
+    "duration": 300000000000,
+    "concurrency": 20,
+    "seed": 11,
+    "warmup": 10000000000,
+    "target_p95_added": 30000000,
+    "note": "cloud sandbox VM, Linux; QuotaGate serve-combined, both example APIs, PostgreSQL 16 and Redis as local processes (no Docker)"
+  },
+  "environment": {
+    "commit": "1b82b29+dirty",
+    "go_version": "go1.27.0",
+    "platform": "linux/amd64",
+    "cpus": 4,
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "note": "cloud sandbox VM, Linux; QuotaGate serve-combined, both example APIs, PostgreSQL 16 and Redis as local processes (no Docker)"
+  },
+  "customers": [
+    {
+      "kind": "open",
+      "daily_limit": 1000000000,
+      "rate_limit_per_minute": 1000000,
+      "weight": 7
+    },
+    {
+      "kind": "open",
+      "daily_limit": 1000000000,
+      "rate_limit_per_minute": 1000000,
+      "weight": 7
+    },
+    {
+      "kind": "open",
+      "daily_limit": 1000000000,
+      "rate_limit_per_minute": 1000000,
+      "weight": 7
+    },
+    {
+      "kind": "open",
+      "daily_limit": 1000000000,
+      "rate_limit_per_minute": 1000000,
+      "weight": 7
+    },
+    {
+      "kind": "open",
+      "daily_limit": 1000000000,
+      "rate_limit_per_minute": 1000000,
+      "weight": 7
+    },
+    {
+      "kind": "open",
+      "daily_limit": 1000000000,
+      "rate_limit_per_minute": 1000000,
+      "weight": 7
+    },
+    {
+      "kind": "open",
+      "daily_limit": 1000000000,
+      "rate_limit_per_minute": 1000000,
+      "weight": 7
+    },
+    {
+      "kind": "open",
+      "daily_limit": 1000000000,
+      "rate_limit_per_minute": 1000000,
+      "weight": 7
+    },
+    {
+      "kind": "daily",
+      "daily_limit": 500,
+      "rate_limit_per_minute": 1000000,
+      "weight": 12
+    },
+    {
+      "kind": "rate",
+      "daily_limit": 1000000000,
+      "rate_limit_per_minute": 120,
+      "weight": 12
+    }
+  ],
+  "baseline": {
+    "requests": 15000,
+    "statuses": {
+      "201": 15000
+    },
+    "reasons": {},
+    "errors": 0,
+    "p50": 1394967,
+    "p95": 2256967,
+    "p99": 15499069,
+    "max": 164632875,
+    "rate": 50.00320693884261
+  },
+  "quotagate": {
+    "requests": 15000,
+    "statuses": {
+      "201": 11659,
+      "429": 3341
+    },
+    "reasons": {
+      "daily_quota": 1739,
+      "rate_limited": 1602
+    },
+    "errors": 0,
+    "p50": 4812316,
+    "p95": 7551050,
+    "p99": 21409830,
+    "max": 143313231,
+    "rate": 50.00281393735595
+  },
+  "added_p50": 3417349,
+  "added_p95": 5294083,
+  "target_met": true,
+  "per_customer": [
+    {
+      "requests": 1276,
+      "allowed": 1276,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "other": 0
+    },
+    {
+      "requests": 1379,
+      "allowed": 1379,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "other": 0
+    },
+    {
+      "requests": 1281,
+      "allowed": 1281,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "other": 0
+    },
+    {
+      "requests": 1305,
+      "allowed": 1305,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "other": 0
+    },
+    {
+      "requests": 1319,
+      "allowed": 1319,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "other": 0
+    },
+    {
+      "requests": 1296,
+      "allowed": 1296,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "other": 0
+    },
+    {
+      "requests": 1355,
+      "allowed": 1355,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "other": 0
+    },
+    {
+      "requests": 1316,
+      "allowed": 1316,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "other": 0
+    },
+    {
+      "requests": 2239,
+      "allowed": 500,
+      "daily_quota": 1739,
+      "rate_limited": 0,
+      "other": 0
+    },
+    {
+      "requests": 2234,
+      "allowed": 632,
+      "daily_quota": 0,
+      "rate_limited": 1602,
+      "other": 0
+    }
+  ],
+  "recorded": [
+    {
+      "decisions": 1339,
+      "allowed": 1339,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "daily_used": 1339
+    },
+    {
+      "decisions": 1442,
+      "allowed": 1442,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "daily_used": 1442
+    },
+    {
+      "decisions": 1344,
+      "allowed": 1344,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "daily_used": 1344
+    },
+    {
+      "decisions": 1368,
+      "allowed": 1368,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "daily_used": 1368
+    },
+    {
+      "decisions": 1381,
+      "allowed": 1381,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "daily_used": 1381
+    },
+    {
+      "decisions": 1358,
+      "allowed": 1358,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "daily_used": 1358
+    },
+    {
+      "decisions": 1417,
+      "allowed": 1417,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "daily_used": 1417
+    },
+    {
+      "decisions": 1378,
+      "allowed": 1378,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "daily_used": 1378
+    },
+    {
+      "decisions": 2239,
+      "allowed": 500,
+      "daily_quota": 1739,
+      "rate_limited": 0,
+      "daily_used": 500
+    },
+    {
+      "decisions": 2234,
+      "allowed": 632,
+      "daily_quota": 0,
+      "rate_limited": 1602,
+      "daily_used": 632
+    }
+  ],
+  "checks": [
+    {
+      "name": "every request got 201 or a known 429",
+      "ok": true,
+      "detail": "0 other responses"
+    },
+    {
+      "name": "handler ran once per 201",
+      "ok": true,
+      "detail": "handler calls 12159, 201 responses 12159"
+    },
+    {
+      "name": "customer 1 (open): one decision record per request",
+      "ok": true,
+      "detail": "records 1339, requests 1339"
+    },
+    {
+      "name": "customer 1 (open): records match responses",
+      "ok": true,
+      "detail": "allowed/daily/rate records 1339/0/0, responses 1339/0/0"
+    },
+    {
+      "name": "customer 1 (open): daily usage equals allowed",
+      "ok": true,
+      "detail": "daily usage 1339, allowed 1339"
+    },
+    {
+      "name": "customer 1 (open): every request allowed",
+      "ok": true,
+      "detail": "allowed 1339 of 1339"
+    },
+    {
+      "name": "customer 2 (open): one decision record per request",
+      "ok": true,
+      "detail": "records 1442, requests 1442"
+    },
+    {
+      "name": "customer 2 (open): records match responses",
+      "ok": true,
+      "detail": "allowed/daily/rate records 1442/0/0, responses 1442/0/0"
+    },
+    {
+      "name": "customer 2 (open): daily usage equals allowed",
+      "ok": true,
+      "detail": "daily usage 1442, allowed 1442"
+    },
+    {
+      "name": "customer 2 (open): every request allowed",
+      "ok": true,
+      "detail": "allowed 1442 of 1442"
+    },
+    {
+      "name": "customer 3 (open): one decision record per request",
+      "ok": true,
+      "detail": "records 1344, requests 1344"
+    },
+    {
+      "name": "customer 3 (open): records match responses",
+      "ok": true,
+      "detail": "allowed/daily/rate records 1344/0/0, responses 1344/0/0"
+    },
+    {
+      "name": "customer 3 (open): daily usage equals allowed",
+      "ok": true,
+      "detail": "daily usage 1344, allowed 1344"
+    },
+    {
+      "name": "customer 3 (open): every request allowed",
+      "ok": true,
+      "detail": "allowed 1344 of 1344"
+    },
+    {
+      "name": "customer 4 (open): one decision record per request",
+      "ok": true,
+      "detail": "records 1368, requests 1368"
+    },
+    {
+      "name": "customer 4 (open): records match responses",
+      "ok": true,
+      "detail": "allowed/daily/rate records 1368/0/0, responses 1368/0/0"
+    },
+    {
+      "name": "customer 4 (open): daily usage equals allowed",
+      "ok": true,
+      "detail": "daily usage 1368, allowed 1368"
+    },
+    {
+      "name": "customer 4 (open): every request allowed",
+      "ok": true,
+      "detail": "allowed 1368 of 1368"
+    },
+    {
+      "name": "customer 5 (open): one decision record per request",
+      "ok": true,
+      "detail": "records 1381, requests 1381"
+    },
+    {
+      "name": "customer 5 (open): records match responses",
+      "ok": true,
+      "detail": "allowed/daily/rate records 1381/0/0, responses 1381/0/0"
+    },
+    {
+      "name": "customer 5 (open): daily usage equals allowed",
+      "ok": true,
+      "detail": "daily usage 1381, allowed 1381"
+    },
+    {
+      "name": "customer 5 (open): every request allowed",
+      "ok": true,
+      "detail": "allowed 1381 of 1381"
+    },
+    {
+      "name": "customer 6 (open): one decision record per request",
+      "ok": true,
+      "detail": "records 1358, requests 1358"
+    },
+    {
+      "name": "customer 6 (open): records match responses",
+      "ok": true,
+      "detail": "allowed/daily/rate records 1358/0/0, responses 1358/0/0"
+    },
+    {
+      "name": "customer 6 (open): daily usage equals allowed",
+      "ok": true,
+      "detail": "daily usage 1358, allowed 1358"
+    },
+    {
+      "name": "customer 6 (open): every request allowed",
+      "ok": true,
+      "detail": "allowed 1358 of 1358"
+    },
+    {
+      "name": "customer 7 (open): one decision record per request",
+      "ok": true,
+      "detail": "records 1417, requests 1417"
+    },
+    {
+      "name": "customer 7 (open): records match responses",
+      "ok": true,
+      "detail": "allowed/daily/rate records 1417/0/0, responses 1417/0/0"
+    },
+    {
+      "name": "customer 7 (open): daily usage equals allowed",
+      "ok": true,
+      "detail": "daily usage 1417, allowed 1417"
+    },
+    {
+      "name": "customer 7 (open): every request allowed",
+      "ok": true,
+      "detail": "allowed 1417 of 1417"
+    },
+    {
+      "name": "customer 8 (open): one decision record per request",
+      "ok": true,
+      "detail": "records 1378, requests 1378"
+    },
+    {
+      "name": "customer 8 (open): records match responses",
+      "ok": true,
+      "detail": "allowed/daily/rate records 1378/0/0, responses 1378/0/0"
+    },
+    {
+      "name": "customer 8 (open): daily usage equals allowed",
+      "ok": true,
+      "detail": "daily usage 1378, allowed 1378"
+    },
+    {
+      "name": "customer 8 (open): every request allowed",
+      "ok": true,
+      "detail": "allowed 1378 of 1378"
+    },
+    {
+      "name": "customer 9 (daily): one decision record per request",
+      "ok": true,
+      "detail": "records 2239, requests 2239"
+    },
+    {
+      "name": "customer 9 (daily): records match responses",
+      "ok": true,
+      "detail": "allowed/daily/rate records 500/1739/0, responses 500/1739/0"
+    },
+    {
+      "name": "customer 9 (daily): daily usage equals allowed",
+      "ok": true,
+      "detail": "daily usage 500, allowed 500"
+    },
+    {
+      "name": "customer 9 (daily): exactly the daily limit allowed",
+      "ok": true,
+      "detail": "allowed 500, want 500; rate_limited 0"
+    },
+    {
+      "name": "customer 10 (rate): one decision record per request",
+      "ok": true,
+      "detail": "records 2234, requests 2234"
+    },
+    {
+      "name": "customer 10 (rate): records match responses",
+      "ok": true,
+      "detail": "allowed/daily/rate records 632/0/1602, responses 632/0/1602"
+    },
+    {
+      "name": "customer 10 (rate): daily usage equals allowed",
+      "ok": true,
+      "detail": "daily usage 632, allowed 632"
+    },
+    {
+      "name": "customer 10 (rate): per-minute limit kept",
+      "ok": true,
+      "detail": "allowed 632, possible 625..720; daily_quota 0"
+    }
+  ]
+}
