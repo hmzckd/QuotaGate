@@ -1,0 +1,61 @@
+# The QG-04 example API with the QuotaGate middleware, calling the Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: example-api
+spec:
+  selector:
+    app: example-api
+  ports:
+    - port: 8081
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: example-api
+  template:
+    metadata:
+      labels:
+        app: example-api
+    spec:
+      terminationGracePeriodSeconds: 15
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: example-api
+          image: quotagate-example-api:local
+          env:
+            - name: QUOTAGATE_URL
+              value: http://quotagate:8080
+            - name: HTTP_ADDR
+              value: ":8081"
+          ports:
+            - name: http
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 3
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

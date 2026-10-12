@@ -1,7 +1,7 @@
 # QuotaGate devam kaydı
 
-- Durum (2026-10-12): **QG-01–11 DONE; v0.1, v0.2 ve v0.3 DONE**. v1.0 için QG-12–14 kaldı.
-- Sıradaki tek görev: **[QG-12 — yerel Kubernetes temel dağıtımı](PLAN.md#qg-12--yerel-kubernetes-temel-dağıtımı)**. Mevcut imajlarla yerel cluster'da iki karar servisi kopyası, örnek API allow/deny ve pod yeniden başlatma sonrası yeni karar; kurulum/temizleme komutları.
+- Durum (2026-10-12): **QG-01–12 DONE; v0.1, v0.2 ve v0.3 DONE**. v1.0 için QG-13–14 kaldı.
+- Sıradaki tek görev: **[QG-13 — son uçtan uca hata demosu](PLAN.md#qg-13--son-uçtan-uca-hata-demosu)**. Tek komut dizisiyle iki müşteri, iki kopya, eşzamanlı yük, bir bağımlılık kesintisi ve toparlanma; müşteri bazında allow/rate/daily/503 uzlaştırması, iki kez baştan sona ve temizlik kontrolü.
 
 ## QG-01 kabulü
 
@@ -128,6 +128,18 @@
 - **Birim testleri:** sabit tohumun aynı planı vermesi ve payların ağırlıklara uyması; ısınmanın yalnızca açık müşterileri kullanması; yavaş yanıtın zamanlamayı kaydırmaması (25 istek, 200 ms yanıt, `<1.5s`); boş işçi beklemesinin gecikmeye girmesi; iptalde hızlı duruş; nearest-rank yüzdelik; eksik kayıt, kullanım farkı, günlük/dakika limiti aşımı, fazla handler çağrısı ve `503` durumlarının her birinin uzlaştırmada yakalanması; dakika sınırındaki isteklerin pencere hesabı; `.env.compose` okuma (parola URL kodlaması) ve eksik sırda hata; taban modunun handler'ı anahtarsız çalıştırması.
 - **Gerçek PostgreSQL 16 + Redis:** `go vet ./...`, `go test ./... -count=1 -p 1` ve `go test -race ./... -count=1 -p 1` geçti. Ölçüm ayrı `quotagate_qg11` veritabanında yapıldı; sonunda müşteri/karar/kullanım `0|0|0`. Loglarda yönetici sırrı bulunmadı, bütün API log satırları JSON.
 - **Sınır:** Tek makine, tek koşu; sonuç ara katmanı aynı koşullardaki tabanıyla karşılaştırır, üretim kapasitesi/HA/genel p95 SLA değildir. Docker Compose ile ölçüm bu ortamda yapılamadı (Docker daemon yok); README'deki komutlarla `reports/qg11-compose.md` üretilebilir. Örnek API'nin QuotaGate istemcisi en çok 10 boşta bağlantı tutuyor; 20 eşzamanlılıkta bağlantı yeniden kurulabilir, bu maliyet ölçüme dahil.
+
+## QG-12 kabulü
+
+- **Dağıtım:** `deploy/k8s/` kustomize dizini, `quotagate` namespace'i. PostgreSQL 17 StatefulSet (1Gi volume), Redis Deployment, iki kopyalı `serve-combined` QuotaGate Deployment (`migrate` init container, readiness `/health/ready`, liveness `/health/live`, `preStop` 5s, `terminationGracePeriodSeconds: 20`, `maxUnavailable: 0`), örnek API Deployment ve her biri için ClusterIP Service. Secret `deploy/k8s/secrets.env` dosyasından `secretGenerator` ile üretiliyor; dosya `.gitignore`'da, repoda yalnızca `secrets.env.example`. Kurulum/duman testi/temizlik komutları README'de. Go çalışma zamanı kodu değişmedi.
+- **Ortam:** Linux bulut sanal makinesi; bu görevde sanal makinedeki Docker daemon (29.8.2) başlatıldı, kind v0.33.0, Kubernetes v1.37.0 (`kindest/node`), kubectl v1.37.1. Yalnızca bu ortama özel ve repoya girmeyen geçici çözümler: makine cgroup v1 kullandığı için kubelet'e `failCgroupV1: false`; sanal makine negatif `oom_score_adj` yazmayı reddettiği için kind düğümünde bu alanı OCI ayarından silen bir runc sarmalayıcısı; Docker Hub isteği sınırı nedeniyle `mirror.gcr.io` aynası; imaj derlemesinde proxy sertifikasını ekleyen geçici Dockerfile kopyası (repo Dockerfile'ı değişmedi). Docker Desktop (cgroup v2) üzerinde bunların hiçbiri gerekmemeli.
+- **Kurulum:** `kubectl apply -k deploy/k8s` sonrası bütün pod'lar yaklaşık 20 saniyede `Running`, yeniden başlatma `0`. İki pod'un `migrate` init container'ı PostgreSQL açılırken ikişer kez yeniden denendi, sonra ikisi de `migrations complete` yazdı (3 ms arayla, advisory lock sırayla geçirdi). `deploy/quotagate 2/2`, `deploy/example-api 1/1`, `deploy/redis 1/1`, `statefulset/postgres 1/1`; dört ClusterIP Service; `quotagate` EndpointSlice'ında iki hazır adres.
+- **Duman testi (`QG_K8S_SMOKE=1 go test ./deploy/k8s`):** art arda beş koşu geçti. Her koşuda günlük limiti 2 olan müşteri `201, 201, 429 daily_quota` aldı. Örnek API'nin konuştuğu QuotaGate pod'u silinirken 10 saniyede istenen 20 kararın 20'si `201` oldu (önce duran pod `preStop` süresinde yanıtladı, kapanınca örnek API Service üzerinden diğer kopyaya bağlandı); yeni pod hazır olup iki kopya olunca 5/5 karar `201`. Geçici müşteriler silindi.
+- **`preStop` olmadan:** dört deneme daha yapıldı, yine hata çıkmadı. Tek düğümde Service güncellemesi hızlı ve örnek API istemcisi bağlantı hatasını aynı karar kimliğiyle yeniden deniyor (QG-07). `preStop` çok düğümlü cluster ve daha yüksek yük için savunma olarak tutuldu; bu ortamda etkisi ölçülemedi.
+- **Redis kesintisi:** `redis` 0 kopyaya indirilince iki QuotaGate pod'u `0/1` hazır oldu, 45 saniye boyunca yeniden başlatma `0` kaldı (liveness bağımlılığa bakmıyor); EndpointSlice iki adresi `ready=false` gösterdi; örnek API `/jobs` `503 decision unavailable` döndü (0.16 s). Redis geri gelince iki pod `1/1` oldu ve QuotaGate yeniden yanıt verdi (geçersiz anahtar `401`).
+- **Temizlik ve yeniden kurulum:** `kubectl delete namespace quotagate` 27 saniyede bitti; namespace ve PersistentVolume kalmadı. Aynı cluster'a `kubectl apply -k deploy/k8s` ile baştan kurulum yapıldı ve duman testi yine geçti.
+- **Testler:** `go vet ./...` ve gerçek PostgreSQL + Redis ile `go test ./... -count=1 -p 1` geçti; duman testi `QG_K8S_SMOKE` olmadan atlanıyor.
+- **Sınır:** tek düğümlü yerel cluster; ingress/TLS, PostgreSQL/Redis HA, yedekleme, autoscaling, Redis Cluster ve AWS/EKS yok. Secret yalnızca base64. QG-10 ve QG-11 kayıtlarındaki "Docker yok" notu, o sırada daemon'un çalışmadığını anlatır; bu görevde başlatılabildiği görüldü.
 
 ## Açık sınır ve ortam
 

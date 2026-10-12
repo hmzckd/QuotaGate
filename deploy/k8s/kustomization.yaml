@@ -1,0 +1,18 @@
+# QG-12: local Kubernetes deployment. Apply with: kubectl apply -k deploy/k8s
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: quotagate
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - redis.yaml
+  - quotagate.yaml
+  - example-api.yaml
+secretGenerator:
+  # secrets.env is local only and ignored by Git; start from secrets.env.example.
+  - name: quotagate-secrets
+    envs:
+      - secrets.env
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: quotagate

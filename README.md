@@ -1,6 +1,6 @@
 # QuotaGate
 
-QuotaGate, çok müşterili bir Go uygulamasının **isteği çalıştırmadan önce** müşteri ve işlem için izin kararı almasını sağlayan dar kapsamlı bir servis çalışmasıdır. Hedef, Go ile API sınırları, eşzamanlı kota güncellemesi, tekrar deneme ve bağımlılık arızası davranışını gösteren yerel bir portföy demosudur. QG-01–04 kalıcı günlük kota ve middleware kullanan örnek API'yi, QG-05 ayrı Redis hız ön kontrolünü, QG-06 birleşik hız/günlük kararını, QG-07 sınırlı istemci tekrarını, QG-08 iki kopyalı gerçek bağımlılık kesintisi ve toparlanmayı içerir. **v0.1 ve v0.2 kabulü tamamlandı**. QG-09 metrik ve correlation ID içeren logları, QG-10 zaman sınırlarını, düzenli kapanışı ve karar kayıtlarının saklama/temizlik komutunu ekler. QG-11, ara katmanın eklediği gecikmeyi tekrarlanabilir bir yükle ölçer ve kararları PostgreSQL ile uzlaştırır.
+QuotaGate, çok müşterili bir Go uygulamasının **isteği çalıştırmadan önce** müşteri ve işlem için izin kararı almasını sağlayan dar kapsamlı bir servis çalışmasıdır. Hedef, Go ile API sınırları, eşzamanlı kota güncellemesi, tekrar deneme ve bağımlılık arızası davranışını gösteren yerel bir portföy demosudur. QG-01–04 kalıcı günlük kota ve middleware kullanan örnek API'yi, QG-05 ayrı Redis hız ön kontrolünü, QG-06 birleşik hız/günlük kararını, QG-07 sınırlı istemci tekrarını, QG-08 iki kopyalı gerçek bağımlılık kesintisi ve toparlanmayı içerir. **v0.1 ve v0.2 kabulü tamamlandı**. QG-09 metrik ve correlation ID içeren logları, QG-10 zaman sınırlarını, düzenli kapanışı ve karar kayıtlarının saklama/temizlik komutunu ekler. QG-11, ara katmanın eklediği gecikmeyi tekrarlanabilir bir yükle ölçer ve kararları PostgreSQL ile uzlaştırır. QG-12 aynı imajları yerel Kubernetes'te iki karar servisi kopyasıyla çalıştırır.
 
 ## İstek akışı
 
@@ -351,3 +351,72 @@ Araç kendi oluşturduğu 10 test müşterisini koşu sonunda siler (`-keep` ile
 ### Sınır
 
 Yük üreticisi, iki örnek API, QuotaGate, PostgreSQL ve Redis aynı makinede çalışır; sonuç ara katmanı aynı koşullardaki kendi tabanıyla karşılaştırır. Üretim kapasitesi, HA veya genel p95 SLA iddiası değildir. Tek koşu tek ölçümdür; kuyruk değerleri (p99, max) koşudan koşuya oynar. Ölçüm sonuçları [STATUS.md](STATUS.md) ve [reports/](reports/) içindedir.
+
+## QG-12 yerel Kubernetes
+
+`deploy/k8s/` bir kustomize dizinidir; `kubectl apply -k deploy/k8s` hepsini `quotagate` namespace'ine kurar.
+
+| Kaynak | Ne yapar |
+| --- | --- |
+| `postgres` StatefulSet + Service | Tek PostgreSQL 17, 1Gi volume; hazır olma kontrolü `pg_isready` |
+| `redis` Deployment + Service | `compose.qg08.yaml` ile aynı ayar: disk kalıcılığı yok, `128mb`, `noeviction` |
+| `quotagate` Deployment (2 kopya) + Service | `serve-combined`; her kopya başlamadan önce `migrate` init container'ı çalışır |
+| `example-api` Deployment + Service | QG-04 örnek API'si, `http://quotagate:8080` Service'ini çağırır |
+| `quotagate-secrets` Secret | `deploy/k8s/secrets.env` dosyasından üretilir; dosya Git dışında, repoda yalnızca `secrets.env.example` var |
+
+Bilinçli ayarlar:
+
+- **Readiness `/health/ready`, liveness `/health/live` (QG-09):** Redis veya PostgreSQL kapanınca kopya trafikten çıkar ama yeniden başlatılmaz; bağımlılık gelince kendiliğinden geri döner.
+- **`maxUnavailable: 0`, `maxSurge: 1`:** güncellemede önce yeni kopya hazır olur, sonra eskisi durur; iki hazır kopya korunur.
+- **Kapanış:** `preStop` 5 saniye bekler, sonra `SIGTERM` gelir ve servis QG-10'daki düzenli kapanışı yapar (en çok 10 sn). `terminationGracePeriodSeconds: 20` ikisini kapsar. Bekleme, durmakta olan pod'un Service'ten çıkarılması her düğüme ulaşmadan yeni isteğin ona gitmesini önlemek içindir.
+- **Migration init container'da:** iki kopya aynı anda başlasa da migration çalıştırıcısındaki PostgreSQL advisory lock (`internal/migrate`) migration'ları sırayla tek kez uygular. Uygulama migration bitmeden başlamaz.
+- **Bağlantı adresi:** `DATABASE_URL`, Secret'taki parolayı `$(QG_DB_PASSWORD)` ile Kubernetes'e doldurtur; `kubectl describe` parolayı göstermez. Parola URL içine girdiği için yalnızca harf ve rakam kullanın.
+- **Güvenlik:** root olmayan kullanıcı (`10001`), salt okunur kök dosya sistemi, ayrıcalık yükseltme kapalı, bütün Linux yetenekleri kaldırılmış, `RuntimeDefault` seccomp. Bellek sınırı QuotaGate `256Mi`, örnek API `128Mi`.
+
+### Kurulum (kind)
+
+Docker Desktop açıkken; kind yoksa `winget install Kubernetes.kind`, `kubectl` Docker Desktop ile gelir:
+
+```powershell
+kind create cluster --name quotagate
+docker build --target quotagate -t quotagate:local .
+docker build --target example-api -t quotagate-example-api:local .
+kind load docker-image quotagate:local quotagate-example-api:local --name quotagate
+Copy-Item deploy/k8s/secrets.env.example deploy/k8s/secrets.env   # iki değeri değiştirin
+kubectl apply -k deploy/k8s
+kubectl -n quotagate rollout status deploy/quotagate --timeout=180s
+kubectl -n quotagate get pods
+```
+
+İlk kurulumda `migrate` init container'ı PostgreSQL hazır olana kadar birkaç kez yeniden denenebilir; bu beklenen durumdur. PostgreSQL ve Redis imajlarını cluster Docker Hub'dan çeker.
+
+Elle denemek için: `kubectl -n quotagate port-forward svc/example-api 18081:8081` ve `kubectl -n quotagate port-forward svc/quotagate 18080:8080`.
+
+Kod değişince imajları yeniden derleyip `kind load` ile yükleyin, sonra `kubectl -n quotagate rollout restart deploy/quotagate deploy/example-api` (etiket hep `:local` olduğu için Kubernetes değişikliği kendisi görmez).
+
+### Duman testi
+
+```powershell
+$env:QG_K8S_SMOKE = "1"
+go test ./deploy/k8s -run TestKubernetesSmoke -count=1 -v
+Remove-Item Env:QG_K8S_SMOKE
+```
+
+Test geçerli `kubectl` bağlamını ve `quotagate` namespace'ini kullanır:
+
+1. Tam iki QuotaGate pod'u olana ve ikisi de hazır olana kadar bekler (durmakta olan pod kalmamalı).
+2. Port-forward ile admin API'den iki geçici müşteri açar; günlük limiti 2 olan müşteri örnek API'de `201, 201, 429 daily_quota` almalı.
+3. Örnek API'nin o anda konuştuğu kopyayı (loglarda kararları gösteren pod) siler ve 10 saniye boyunca her yarım saniyede bir karar ister; 20 kararın hepsi `201` olmalı.
+4. Yeni pod hazır olup yine iki kopya olunca 5 karar daha ister; hepsi `201` olmalı.
+5. Geçici müşterileri PostgreSQL'den siler.
+
+### Temizlik
+
+```powershell
+kubectl delete namespace quotagate     # PostgreSQL volume'u dahil her şeyi siler
+kind delete cluster --name quotagate   # cluster'ı tamamen kaldırır
+```
+
+### Sınır
+
+Tek düğümlü yerel cluster. Ingress/TLS, PostgreSQL ve Redis için yüksek erişilebilirlik, yedekleme, otomatik ölçekleme, Redis Cluster ve AWS/EKS yok. Kubernetes Secret yalnızca base64 kodludur, şifreli değildir. Kanıt ve ortam ayrıntıları [STATUS.md](STATUS.md) içindedir.

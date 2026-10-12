@@ -3,3 +3,4 @@
 *.exe
 coverage.out
 .cache/
+deploy/k8s/secrets.env
