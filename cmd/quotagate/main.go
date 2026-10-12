@@ -22,8 +22,10 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	if err := run(); err != nil {
-		slog.Error("quotagate stopped", "error", err)
+		// Raw startup errors can contain a DSN. Log only the error's type.
+		slog.Error("quotagate stopped", "error_type", fmt.Sprintf("%T", err))
 		os.Exit(1)
 	}
 }

@@ -35,15 +35,17 @@ type management struct {
 	store     CustomerStore
 	adminHash [32]byte
 	rate      RateLimiter
+	obs       *observation
 }
 
 func NewAppHandler(db Pinger, customerStore CustomerStore, adminToken string) http.Handler {
-	return newAppHandler(db, customerStore, adminToken, nil)
+	return newAppHandler(db, customerStore, adminToken, nil, nil)
 }
 
-func newAppHandler(db Pinger, customerStore CustomerStore, adminToken string, rate RateLimiter) http.Handler {
-	mux := newHealthMux(db)
-	m := &management{store: customerStore, adminHash: sha256.Sum256([]byte(adminToken)), rate: rate}
+func newAppHandler(db Pinger, customerStore CustomerStore, adminToken string, rate RateLimiter, readyRate Pinger) http.Handler {
+	o := newObservation()
+	mux := newHealthMux(db, readyRate, o)
+	m := &management{store: customerStore, adminHash: sha256.Sum256([]byte(adminToken)), rate: rate, obs: o}
 	mux.Handle("POST /v1/admin/customers", m.adminOnly(http.HandlerFunc(m.createCustomer)))
 	mux.Handle("POST /v1/admin/customers/{customerID}/rotate-key", m.adminOnly(http.HandlerFunc(m.rotateKey)))
 	mux.Handle("POST /v1/admin/customers/{customerID}/disable", m.adminOnly(http.HandlerFunc(m.disableCustomer)))
@@ -55,7 +57,7 @@ func newAppHandler(db Pinger, customerStore CustomerStore, adminToken string, ra
 	if rate != nil {
 		mux.HandleFunc("POST /demo/rate-checks", m.rateCheck)
 	}
-	return mux
+	return o.wrap(mux)
 }
 
 func (m *management) adminOnly(next http.Handler) http.Handler {
@@ -90,6 +92,7 @@ func (m *management) createCustomer(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	customer, key, err := m.store.CreateCustomer(ctx, name)
 	if err != nil {
+		m.obs.failure(ctx, "postgres", "create_customer", err)
 		writeError(w, http.StatusServiceUnavailable, "customer storage unavailable")
 		return
 	}
@@ -105,6 +108,7 @@ func (m *management) rotateKey(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	key, err := m.store.RotateKey(ctx, r.PathValue("customerID"))
 	if err != nil {
+		m.obs.failure(ctx, "postgres", "rotate_key", err)
 		writeStoreError(w, err)
 		return
 	}
@@ -118,6 +122,7 @@ func (m *management) disableCustomer(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := requestContext(r)
 	defer cancel()
 	if err := m.store.DisableCustomer(ctx, r.PathValue("customerID")); err != nil {
+		m.obs.failure(ctx, "postgres", "disable_customer", err)
 		writeStoreError(w, err)
 		return
 	}
@@ -150,6 +155,7 @@ func (m *management) putPolicy(w http.ResponseWriter, r *http.Request) {
 		RateLimitPerMinute: body.RateLimitPerMinute,
 	})
 	if err != nil {
+		m.obs.failure(ctx, "postgres", "put_policy", err)
 		writeStoreError(w, err)
 		return
 	}
@@ -186,6 +192,7 @@ func (m *management) getPolicy(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	policy, err := m.store.GetPolicy(ctx, customer.ID, operation)
 	if err != nil {
+		m.obs.failure(ctx, "postgres", "get_policy", err)
 		writeStoreError(w, err)
 		return
 	}
@@ -216,6 +223,7 @@ func (m *management) decide(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	decision, err := m.store.Decide(ctx, customer.ID, body.DecisionID, body.Operation)
 	if err != nil {
+		m.obs.failure(ctx, "postgres", "decide", err)
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			unauthorized(w)
@@ -229,6 +237,7 @@ func (m *management) decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	decisionOutcome(r, decision.Reason)
 	writeJSON(w, http.StatusOK, decision)
 }
 
@@ -247,6 +256,7 @@ func (m *management) usage(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	usage, err := m.store.Usage(ctx, customer.ID, operations[0])
 	if err != nil {
+		m.obs.failure(ctx, "postgres", "usage", err)
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			unauthorized(w)
@@ -274,6 +284,7 @@ func (m *management) customer(w http.ResponseWriter, r *http.Request) (store.Cus
 		return store.Customer{}, false
 	}
 	if err != nil {
+		m.obs.failure(ctx, "postgres", "authenticate", err)
 		writeError(w, http.StatusServiceUnavailable, "customer storage unavailable")
 		return store.Customer{}, false
 	}

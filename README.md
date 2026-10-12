@@ -1,6 +1,6 @@
 # QuotaGate
 
-QuotaGate, çok müşterili bir Go uygulamasının **isteği çalıştırmadan önce** müşteri ve işlem için izin kararı almasını sağlayan dar kapsamlı bir servis çalışmasıdır. Hedef, Go ile API sınırları, eşzamanlı kota güncellemesi, tekrar deneme ve bağımlılık arızası davranışını gösteren yerel bir portföy demosudur. QG-01–04 kalıcı günlük kota ve middleware kullanan örnek API'yi, QG-05 ayrı Redis hız ön kontrolünü, QG-06 birleşik hız/günlük kararını, QG-07 sınırlı istemci tekrarını, QG-08 iki kopyalı gerçek bağımlılık kesintisi ve toparlanmayı içerir. **v0.1 ve v0.2 kabulü tamamlandı**; gözlemlenebilirlik ve performans ölçümü v0.3 görevlerindedir.
+QuotaGate, çok müşterili bir Go uygulamasının **isteği çalıştırmadan önce** müşteri ve işlem için izin kararı almasını sağlayan dar kapsamlı bir servis çalışmasıdır. Hedef, Go ile API sınırları, eşzamanlı kota güncellemesi, tekrar deneme ve bağımlılık arızası davranışını gösteren yerel bir portföy demosudur. QG-01–04 kalıcı günlük kota ve middleware kullanan örnek API'yi, QG-05 ayrı Redis hız ön kontrolünü, QG-06 birleşik hız/günlük kararını, QG-07 sınırlı istemci tekrarını, QG-08 iki kopyalı gerçek bağımlılık kesintisi ve toparlanmayı içerir. **v0.1 ve v0.2 kabulü tamamlandı**. QG-09 metrik ve correlation ID içeren logları ekler; timeout/veri ömrü ve performans ölçümü v0.3'ün sonraki görevleridir.
 
 ## İstek akışı
 
@@ -188,4 +188,49 @@ Redis bu demoda disk kalıcılığı olmadan çalışır. Yeniden başlatma hız
 
 İki bağımlılık geri geldiğinde readiness ve yeni kararlar toparlanır. Betik iki QuotaGate kopyasının ve örnek API'nin konteyner kimliği, başlangıç zamanı ve restart sayısını karşılaştırarak uygulamalar yeniden başlatılmadan bağlantıların toparlandığını doğrular. Son günlük kullanım müşteri bazında `7/3/4`; PostgreSQL kullanım/karar/izin/günlük ret/hız ret/farklı kimlik toplamı `14|105|14|38|53|105` olur. Örnek API handler'ı üç izin için `+3` çalışır; son günlük kota reddi `429` verir. Doğrudan karar izinleri handler çağrısı değildir.
 
-Betik loglarda müşteri anahtarlarını, yönetici sırrını ve DB parolasını arar. `finally` durdurduğu bağımlılıkları geri getirir, yalnızca oluşturduğu müşteri verisini ve Redis anahtarlarını temizler. `down` PostgreSQL hacmini korur. Bu yerel demo üretim HA veya otomatik failover kanıtı değildir. Birim, gerçek bağımlılık, race ve canlı Compose kabul sonuçları [STATUS.md](STATUS.md) içindedir; sıradaki görev QG-09 gözlemlenebilir kararlardır.
+Betik loglarda müşteri anahtarlarını, yönetici sırrını ve DB parolasını arar. `finally` durdurduğu bağımlılıkları geri getirir, yalnızca oluşturduğu müşteri verisini ve Redis anahtarlarını temizler. `down` PostgreSQL hacmini korur. Bu yerel demo üretim HA veya otomatik failover kanıtı değildir. Birim, gerçek bağımlılık, race ve canlı Compose kabul sonuçları [STATUS.md](STATUS.md) içindedir.
+
+## QG-09 karar metrikleri ve loglar
+
+QuotaGate modları `GET /metrics` üzerinde [resmi Prometheus Go istemcisi](https://pkg.go.dev/github.com/prometheus/client_golang/prometheus) ile süreç başına ayrı registry sunar. Exporter bağımlılıklara sorgu yapmaz; Redis/PostgreSQL kapalıyken de okunur. Bu yerel Compose kurulumunda aynı loopback HTTP portundadır. Prometheus sunucusu veya dashboard bu görevin parçası değildir.
+
+| Metrik | Etiketler | Anlam |
+| --- | --- | --- |
+| `qg_decision_responses_total` | `outcome` | `allowed`, `rate_limited`, `daily_quota`, `unavailable` ve diğer sabit HTTP hata sınıfları |
+| `qg_http_requests_total` | `route`, `method`, `status` | Tamamlanan HTTP handler'ının seçtiği yanıt durumu |
+| `qg_http_request_duration_seconds` | `route`, `method` | Bağımlılık beklemeleri dahil handler süresi histogramı |
+| `qg_dependency_errors_total` | `dependency`, `operation` | PostgreSQL/Redis işlem hataları; geçersiz anahtar, eksik politika ve kimlik çatışması hata sayılmaz |
+| `qg_dependency_ready` | `dependency` | İlgili bağımlılığın son readiness probu: `1` hazır, `0` başarısız, `-1` henüz ölçülmedi |
+| `qg_ready` | Yok | Son birleşik readiness probunun sonucu; aynı `1/0/-1` anlamı |
+
+Readiness PostgreSQL ve varsa Redis'i **aynı bir saniyelik bağlam içinde eşzamanlı** kontrol eder; iki bağımlılığın sonucu ayrı görünür. Gauge değerleri son probe aittir; `/metrics` güncel bağlantı testi yapmaz. Liveness bağımlılıklardan ayrıdır. Prometheus'un readiness durumunu takip etmesi için `/health/ready` düzenli çağrılmalıdır; Compose healthcheck bunu yapar.
+
+Bağımlılık hata etiketi başarısız çağrının yerini gösterir; timeout ve bağlam iptali de dahildir. Tek başına altyapı arızasının kök nedenini belirlemez.
+
+Karar sayacı **HTTP yanıt girişimlerini** sayar: aynı karar kimliğinin tekrarı ve middleware'in her taşıma denemesi ayrı örnektir. `allowed` sayısı kalıcı ayrılan hak veya çalışan handler sayısı değildir. Yanıtın seçilmesi teslim edildiğini kanıtlamaz. Kalıcı kullanım PostgreSQL'den, örnek handler sayısı `/demo/stats` üzerinden uzlaştırılır. Süreç yeniden başladığında metrikler sıfırlanır; kopyalar kendi sayaçlarını sunar. `/metrics` okumaları istek metriğine ve HTTP loguna katılmaz.
+
+Histogram sınırları saniye olarak `0.001/0.005/0.01/0.025/0.05/0.1/0.25/0.5/1/2/5/+Inf`. İki kopya Prometheus tarafından toplandığında karar ucunun yaklaşık p95 handler süresi:
+
+```promql
+histogram_quantile(0.95,
+  sum by (le) (
+    rate(qg_http_request_duration_seconds_bucket{route="/v1/decisions",method="POST"}[5m])
+  )
+)
+```
+
+Bu hesap bucket çözünürlüğüne bağlıdır; ağ gidiş/dönüş süresini veya middleware ek gecikmesini ölçmez. [Histogram ve quantile hesabı](https://prometheus.io/docs/practices/histograms/). Kontrollü p95 ek gecikme deneyi QG-11'dedir.
+
+CLI JSON log kullanır. Her HTTP çağrısı servis tarafından üretilen yeni 128 bit `correlation_id` ve yanıtta aynı `X-Request-ID` alır; caller'ın verdiği header loga taşınmaz. `http_request` kaydı sabit route şablonu, sınırlı method, status, süre, bağımlılık hata bayrakları ve karar ucunda outcome içerir. Anahtar, DB/Redis URL'si, header, gövde, query, ham path, müşteri/karar kimliği veya ham bağımlılık hatası kaydedilmez. Başlangıç hatalarında yalnızca hata tipi loglanır; süreç hata koduyla kapanır. Bu correlation ID backend HTTP çağrısına aittir; farklı tekrarlar yeni ID alır, uçtan uca tracing değildir.
+
+Etiketler sabit route şablonlarından ve sınırlı sonuç sınıflarından seçilir. Tanınmayan yollar `unmatched`, özel HTTP method'ları `OTHER` olur. Operation adı, correlation ID ve müşteri/karar kimlikleri etiket değildir. [Prometheus etiket kardinalitesi](https://prometheus.io/docs/practices/instrumentation/#do-not-overuse-labels).
+
+Gerçek kesinti/metrik kabulü için ayrı proje ve hacim; QG-08 topolojisini kullanır:
+
+```powershell
+docker compose -p quotagate-qg09 --env-file .env.compose -f compose.yaml -f compose.qg08.yaml up --build -d --wait
+pwsh -NoProfile -File ./scripts/smoke-qg09.ps1
+docker compose -p quotagate-qg09 --env-file .env.compose -f compose.yaml -f compose.qg08.yaml down
+```
+
+Önceki demolarla aynı portlar kullanılır. Boş PostgreSQL/Redis, yeni API konteynerleri ve başka karar trafiği olmayan ortam gerekir. Betik üç geçici müşteri oluşturur; izin/hız/günlük ret/kalıcı tekrar, gerçek Redis ve PostgreSQL kesintileri, bağımlılık gauge'ları ve hata sınıfları, histogram örnekleri ve yanıt–JSON log correlation eşleşmesini kontrol eder. Caller header'ında yönetici sırrı ve tanınmayan URL'de müşteri/anahtar verisi göndererek telemetry'de bulunmadığını da doğrular. Yalnızca kendi müşteri/Redis verisini temizler ve durdurduğu bağımlılıkları geri getirir. Kabul sonuçları ve sonraki görev [STATUS.md](STATUS.md) içindedir.

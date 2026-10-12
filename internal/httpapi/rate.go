@@ -14,22 +14,10 @@ type RateLimiter interface {
 	Ping(context.Context) error
 }
 
-type rateDependencies struct {
-	db   Pinger
-	rate RateLimiter
-}
-
-func (d rateDependencies) Ping(ctx context.Context) error {
-	if err := d.db.Ping(ctx); err != nil {
-		return err
-	}
-	return d.rate.Ping(ctx)
-}
-
 // NewRateAppHandler enables the QG-05 pre-check demo and Redis readiness.
 // /v1/decisions keeps its v0.1 daily-only contract until QG-06.
 func NewRateAppHandler(db Pinger, customers CustomerStore, adminToken string, rate RateLimiter) http.Handler {
-	return newAppHandler(rateDependencies{db, rate}, customers, adminToken, rate)
+	return newAppHandler(db, customers, adminToken, rate, rate)
 }
 
 func (m *management) rateCheck(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +44,7 @@ func (m *management) rateCheck(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	policy, err := m.store.GetPolicy(ctx, customer.ID, body.Operation)
 	if err != nil {
+		m.obs.failure(ctx, "postgres", "get_policy", err)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusForbidden, "operation policy not found")
 		} else {
@@ -65,6 +54,7 @@ func (m *management) rateCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := m.rate.Check(ctx, customer.ID, body.DecisionID, body.Operation, int64(policy.RateLimitPerMinute))
 	if err != nil {
+		m.obs.failure(ctx, "redis", "check", err)
 		if errors.Is(err, ratelimit.ErrDecisionConflict) {
 			writeError(w, http.StatusConflict, "decision ID already used for another operation")
 		} else {

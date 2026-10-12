@@ -25,6 +25,9 @@ func (s combinedStore) Decide(ctx context.Context, customerID, decisionID, opera
 		if errors.Is(err, ratelimit.ErrDecisionConflict) {
 			return false, store.ErrDecisionConflict
 		}
+		if err != nil {
+			return false, &dependencyError{cause: err}
+		}
 		return result.Allowed, err
 	})
 }
@@ -32,5 +35,5 @@ func (s combinedStore) Decide(ctx context.Context, customerID, decisionID, opera
 // NewCombinedAppHandler enables durable rate + daily decisions. The separate
 // preliminary demo endpoint is exposed only by NewRateAppHandler.
 func NewCombinedAppHandler(db Pinger, customers CombinedStore, adminToken string, rate RateLimiter) http.Handler {
-	return newAppHandler(rateDependencies{db, rate}, combinedStore{customers, rate}, adminToken, nil)
+	return newAppHandler(db, combinedStore{customers, rate}, adminToken, nil, rate)
 }

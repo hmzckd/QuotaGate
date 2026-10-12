@@ -11,10 +11,16 @@ type Pinger interface {
 }
 
 func NewHandler(db Pinger) http.Handler {
-	return newHealthMux(db)
+	o := newObservation()
+	return o.wrap(newHealthMux(db, nil, o))
 }
 
-func newHealthMux(db Pinger) *http.ServeMux {
+func newHealthMux(db Pinger, rate Pinger, o *observation) *http.ServeMux {
+	o.dependency.WithLabelValues("postgres").Set(-1)
+	if rate != nil {
+		o.dependency.WithLabelValues("redis").Set(-1)
+	}
+	dependencies := observedReadiness{db: db, rate: rate, obs: o}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -25,7 +31,7 @@ func newHealthMux(db Pinger) *http.ServeMux {
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 		defer cancel()
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		if err := db.Ping(ctx); err != nil {
+		if err := dependencies.Ping(ctx); err != nil {
 			http.Error(w, "dependency unavailable", http.StatusServiceUnavailable)
 			return
 		}
