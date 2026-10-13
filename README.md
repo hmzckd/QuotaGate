@@ -1,6 +1,6 @@
 # QuotaGate
 
-QuotaGate, çok müşterili bir Go uygulamasının **isteği çalıştırmadan önce** müşteri ve işlem için izin kararı almasını sağlayan dar kapsamlı bir servis çalışmasıdır. Hedef, Go ile API sınırları, eşzamanlı kota güncellemesi, tekrar deneme ve bağımlılık arızası davranışını gösteren yerel bir portföy demosudur. QG-01–04 kalıcı günlük kota ve middleware kullanan örnek API'yi, QG-05 ayrı Redis hız ön kontrolünü, QG-06 birleşik hız/günlük kararını, QG-07 sınırlı istemci tekrarını, QG-08 iki kopyalı gerçek bağımlılık kesintisi ve toparlanmayı içerir. **v0.1 ve v0.2 kabulü tamamlandı**. QG-09 metrik ve correlation ID içeren logları, QG-10 zaman sınırlarını, düzenli kapanışı ve karar kayıtlarının saklama/temizlik komutunu ekler. QG-11, ara katmanın eklediği gecikmeyi tekrarlanabilir bir yükle ölçer ve kararları PostgreSQL ile uzlaştırır. QG-12 aynı imajları yerel Kubernetes'te iki karar servisi kopyasıyla çalıştırır.
+QuotaGate, çok müşterili bir Go uygulamasının **isteği çalıştırmadan önce** müşteri ve işlem için izin kararı almasını sağlayan dar kapsamlı bir servis çalışmasıdır. Hedef, Go ile API sınırları, eşzamanlı kota güncellemesi, tekrar deneme ve bağımlılık arızası davranışını gösteren yerel bir portföy demosudur. QG-01–04 kalıcı günlük kota ve middleware kullanan örnek API'yi, QG-05 ayrı Redis hız ön kontrolünü, QG-06 birleşik hız/günlük kararını, QG-07 sınırlı istemci tekrarını, QG-08 iki kopyalı gerçek bağımlılık kesintisi ve toparlanmayı içerir. **v0.1 ve v0.2 kabulü tamamlandı**. QG-09 metrik ve correlation ID içeren logları, QG-10 zaman sınırlarını, düzenli kapanışı ve karar kayıtlarının saklama/temizlik komutunu ekler. QG-11, ara katmanın eklediği gecikmeyi tekrarlanabilir bir yükle ölçer ve kararları PostgreSQL ile uzlaştırır. QG-12 aynı imajları yerel Kubernetes'te iki karar servisi kopyasıyla çalıştırır. QG-13, yük altında Redis ya da PostgreSQL kesintisini ve toparlanmayı tek komutla gösterir, her kararı uzlaştırır.
 
 ## İstek akışı
 
@@ -420,3 +420,60 @@ kind delete cluster --name quotagate   # cluster'ı tamamen kaldırır
 ### Sınır
 
 Tek düğümlü yerel cluster. Ingress/TLS, PostgreSQL ve Redis için yüksek erişilebilirlik, yedekleme, otomatik ölçekleme, Redis Cluster ve AWS/EKS yok. Kubernetes Secret yalnızca base64 kodludur, şifreli değildir. Kanıt ve ortam ayrıntıları [STATUS.md](STATUS.md) içindedir.
+
+## QG-13 uçtan uca hata demosu
+
+`cmd/qgdemo` tek komutla bütün demoyu yürütür: kendi Compose projesini (`quotagate-qg13`) kurar, iki müşteriyle iki QuotaGate kopyasına sürekli yük gönderir, yük sürerken bir bağımlılığı durdurup yeniden başlatır. Sonra her yanıtı örnek API'lerin handler sayaçları, PostgreSQL ve Redis ile uzlaştırır, rapor yazar ve projeyi hacmiyle birlikte siler.
+
+```powershell
+go run ./cmd/qgdemo -outage redis -note "Docker Desktop, <bilgisayar>"
+go run ./cmd/qgdemo -outage postgres -note "Docker Desktop, <bilgisayar>"
+```
+
+Docker Desktop açık ve `.env.compose` hazır olmalı. Bir koşu ilk derleme hariç yaklaşık iki dakika sürer. Rapor `reports/qg13-<redis|postgres>-<UTC zaman>.md`, yanında aynı adla `.json` (ham sayılar). Bir kontrol bile tutmazsa çıkış kodu `1`.
+
+### Kurulum
+
+| Parça | Ayrıntı |
+| --- | --- |
+| PostgreSQL, Redis | `compose.yaml` ve `compose.qg08.yaml` ile aynı ayarlar; Redis diske yazmaz |
+| İki QuotaGate kopyası | `api` ve `api-2`, `serve-combined` |
+| İki örnek API | `example-api` birinci kopyayı, `example-api-2` (`compose.qg13.yaml`) ikinci kopyayı çağırır |
+| Portlar | QuotaGate `28080`/`28082`, örnek API `28081`/`28084`, PostgreSQL `25432`, Redis `26379`. Başka bir QuotaGate projesi açıkken de çalışır |
+
+### Senaryo
+
+| Müşteri | Günlük limit | Dakika limiti | Beklenen |
+| --- | ---: | ---: | --- |
+| basic | 100 | 60 | Her dakika penceresinde en çok 60 hız izni; 100 izinden sonra `daily_quota` |
+| pro | 100.000 | 1200 | Limitleri bütün yükünden büyük; hiç reddedilmez |
+
+- **Yük:** saniyede 20 istek, açık döngü (QG-11 `loadtest.Run`). Yarısı bir örnek API'ye, yarısı diğerine gider; müşteriler sırayla gelir. 30 saniye normal, 25 saniye kesinti, sonra 35 saniye (`-before`, `-outage-for`, `-after`).
+- **Kesinti:** `docker compose stop redis` ya da `docker compose stop db`; süre dolunca `docker compose up -d --no-deps --wait`.
+- **Hazır olma:** araç iki kopyanın `/health/ready` ucunu 250 ms'de bir sorar. İkisi de `503` deyince kesinti fark edilmiş, ikisi de `200` deyince toparlanma bitmiş sayılır. Bütün değişimler rapordaki zaman çizelgesinde.
+
+### Kontroller
+
+- Her yanıt `201`, bilinen bir `429` (`daily_quota`, `rate_limited`) ya da `503`. Handler tam `201` sayısı kadar çalıştı.
+- **Kesinti öncesi:** her istek karar aldı.
+- **Kesinti sırasında:** yoldaki istekler bittikten sonra (3 saniye) yeniden başlatmaya kadar gönderilen her istek `503` aldı, handler sayacı hiç değişmedi.
+- **Toparlanma sonrası:** iki kopya hazır olduktan 3 saniye sonra gönderilen her istek yeniden karar aldı. İki kopya da kesintiden önce ve sonra izin verdi.
+- **Müşteri başına PostgreSQL:** karar kaydı, izin, `daily_quota` ve `rate_limited` sayıları yanıtlarla aynı; `daily_usage` izin sayısına eşit; izin günlük limiti geçmedi, `daily_quota` varsa izin tam limitte.
+- **Müşteri başına Redis:** her pencere dakika limitinde ya da altında. Redis'in karar kimliği başına 24 saat tuttuğu ön sonuçlar (hız kontrolünü geçen ve geçemeyen) PostgreSQL kayıtlarıyla aynı. Redis kesintisinde bu karşılaştırma yeniden başlatmadan sonrası içindir.
+- **pro:** limitleri bütün yükünden büyük olduğu için hiç `429` almadı. basic'in limitleri ona dokunmadı.
+- Uygulama konteynerleri yeniden başlamadan bağlantıyı kendisi kurdu (başlama zamanı ve yeniden başlama sayısı aynı). Yönetici sırrı, veritabanı parolası ve iki API anahtarı uygulama loglarında yok.
+
+**Belirsiz `503`:** bağımlılık kapanırken ya da açılırken yolda olan bir istek, QuotaGate Redis'te hak harcadıktan ya da PostgreSQL'e kararı yazdıktan sonra yanıtını kaybetmiş olabilir. Bu yüzden yalnızca o anlarda yoldaki `503`'ler kayıtlarda en çok o kadar fazlalığa izin verir. Tam kesinti sırasındaki `503` iz bırakamaz: Redis kapalıyken PostgreSQL transaction'ı geri alınır, PostgreSQL kapalıyken Redis'e hiç gidilmez.
+
+**Redis yeniden başlayınca:** Redis diske yazmadığı için pencere sayaçları ve ön sonuçlar kaybolur (QG-08 kararı). Durdurma ve başlatma aynı dakikadaysa o dakika limitin iki katına kadar izin verebilir. Rapor bunu sayılarıyla yazar. Yeniden başlatmadan önceki kararlar PostgreSQL'den kontrol edilir: Redis'in açık olduğu her dakika için en çok limit kadar.
+
+### Temizlik ve tekrar
+
+- Başlamadan önce Docker'da `quotagate-qg13` etiketli bir konteyner, hacim, ağ ya da imaj varsa araç çalışmaz ve silme komutunu yazar. Kendi oluşturmadığı hiçbir şeyi kullanmaz ve silmez.
+- Sonunda `docker compose ... down -v --remove-orphans --rmi local` çalışır, ardından Docker'a projeye ait bir şey kalıp kalmadığı sorulur. Ctrl+C ve hata durumunda da çalışır. `-keep` projeyi inceleme için bırakır ve silme komutunu yazar.
+- `.env.compose` dosyasından yalnızca `QG_ADMIN_TOKEN` ve `QG_DB_PASSWORD` okunur, ekrana ve rapora yazılmaz. Bu dosyadaki port değerleri demo projesinde kullanılmaz.
+- `-override` son sıraya bir Compose dosyası daha ekler (örneğin kurumsal proxy için derleme ayarı); rapor bunu yazar.
+
+### Sınır
+
+Tek makine, aynı anda tek bağımlılık kesintisi, planlı `docker compose stop`. Gösterdiği şey bu koşullarda QuotaGate'in davranışı ve toparlanmasıdır; üretim erişilebilirliği, HA ya da kapasite iddiası değildir. Ağ bölünmesi, yavaşlayan (kapanmayan) bağımlılık ve iki bağımlılığın birlikte kapanması denenmedi. Ölçüm sonuçları [STATUS.md](STATUS.md) ve [reports/](reports/) içinde.

@@ -4,7 +4,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -16,12 +15,12 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"quotagate/internal/envfile"
 	"quotagate/internal/loadtest"
 )
 
@@ -179,7 +178,7 @@ func secrets(composeEnv string) (adminToken, databaseURL string, err error) {
 		}
 		return adminToken, databaseURL, nil
 	}
-	values, err := readEnvFile(composeEnv)
+	values, err := envfile.Read(composeEnv)
 	if err != nil {
 		return "", "", err
 	}
@@ -193,25 +192,6 @@ func secrets(composeEnv string) (adminToken, databaseURL string, err error) {
 	u := url.URL{Scheme: "postgres", User: url.UserPassword("quotagate", values["QG_DB_PASSWORD"]),
 		Host: "127.0.0.1:" + port, Path: "/quotagate", RawQuery: "sslmode=disable"}
 	return values["QG_ADMIN_TOKEN"], u.String(), nil
-}
-
-func readEnvFile(path string) (map[string]string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	values := map[string]string{}
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		key, value, ok := strings.Cut(line, "=")
-		if !ok || strings.HasPrefix(line, "#") {
-			continue
-		}
-		values[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"'`)
-	}
-	return values, scanner.Err()
 }
 
 // preflight refuses to measure a wrong setup: a swapped baseline, a service

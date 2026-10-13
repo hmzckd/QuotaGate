@@ -1,0 +1,21 @@
+# QG-13 fault demo: a second example API in front of the second QuotaGate copy,
+# so load reaches both copies. Apply after compose.yaml and compose.qg08.yaml;
+# cmd/qgdemo starts and removes the isolated quotagate-qg13 project itself.
+services:
+  example-api-2:
+    build:
+      context: .
+      target: example-api
+    environment:
+      QUOTAGATE_URL: http://api-2:8080
+      HTTP_ADDR: :8081
+    ports:
+      - "127.0.0.1:${QG_EXAMPLE_2_PORT:-18084}:8081"
+    depends_on:
+      api-2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health/live"]
+      interval: 3s
+      timeout: 2s
+      retries: 15

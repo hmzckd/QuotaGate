@@ -1,0 +1,435 @@
+{
+  "started_at": "2026-10-12T21:24:44.06407681Z",
+  "finished_at": "2026-10-12T21:26:14.408091707Z",
+  "settings": {
+    "outage": "postgres",
+    "rate": 20,
+    "before": 30000000000,
+    "outage_for": 25000000000,
+    "after": 35000000000,
+    "concurrency": 32,
+    "override": "qg13-sandbox-build.yaml",
+    "note": "Linux cloud VM, 4 CPUs (Intel Xeon 2.10GHz), Docker 29.8.2 in the same VM, run 1 of 2"
+  },
+  "environment": {
+    "commit": "290044b+dirty",
+    "go_version": "go1.27.0",
+    "platform": "linux/amd64",
+    "docker": "29.8.2",
+    "note": "Linux cloud VM, 4 CPUs (Intel Xeon 2.10GHz), Docker 29.8.2 in the same VM, run 1 of 2"
+  },
+  "customers": [
+    {
+      "name": "basic",
+      "daily_limit": 100,
+      "rate_limit_per_minute": 60
+    },
+    {
+      "name": "pro",
+      "daily_limit": 100000,
+      "rate_limit_per_minute": 1200
+    }
+  ],
+  "timeline": {
+    "load_start": "2026-10-12T21:24:44.064077407Z",
+    "stop_issued": "2026-10-12T21:25:14.065305815Z",
+    "stopped": "2026-10-12T21:25:14.474217173Z",
+    "unready": "2026-10-12T21:25:14.264466255Z",
+    "quiet_from": "2026-10-12T21:25:17.474217173Z",
+    "quiet_to": "2026-10-12T21:25:39.064077407Z",
+    "start_issued": "2026-10-12T21:25:39.074325724Z",
+    "started": "2026-10-12T21:25:43.103556066Z",
+    "ready": "2026-10-12T21:25:39.713805802Z",
+    "load_end": "2026-10-12T21:26:13.97036782Z"
+  },
+  "readiness": [
+    {
+      "at": "2026-10-12T21:24:44.013624661Z",
+      "copy": 1,
+      "status": 200
+    },
+    {
+      "at": "2026-10-12T21:24:44.01406656Z",
+      "copy": 2,
+      "status": 200
+    },
+    {
+      "at": "2026-10-12T21:25:14.264402641Z",
+      "copy": 2,
+      "status": 503
+    },
+    {
+      "at": "2026-10-12T21:25:14.264466255Z",
+      "copy": 1,
+      "status": 503
+    },
+    {
+      "at": "2026-10-12T21:25:39.703411809Z",
+      "copy": 2,
+      "status": 200
+    },
+    {
+      "at": "2026-10-12T21:25:39.713805802Z",
+      "copy": 1,
+      "status": 200
+    }
+  ],
+  "handler_calls": {
+    "before": 0,
+    "quiet_from": 402,
+    "quiet_to": 402,
+    "after": 764
+  },
+  "responses": [
+    {
+      "requests": 900,
+      "created": 100,
+      "daily_quota": 80,
+      "rate_limited": 485,
+      "unavailable": 235,
+      "other": 0,
+      "uncertain": 9
+    },
+    {
+      "requests": 900,
+      "created": 664,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "unavailable": 236,
+      "other": 0,
+      "uncertain": 10
+    }
+  ],
+  "copies": [
+    {
+      "requests": 900,
+      "created": 382,
+      "refused": 282,
+      "unavailable": 236,
+      "other": 0
+    },
+    {
+      "requests": 900,
+      "created": 382,
+      "refused": 283,
+      "unavailable": 235,
+      "other": 0
+    }
+  ],
+  "buckets": [
+    {
+      "from_second": 0,
+      "requests": 100,
+      "created": 100,
+      "refused": 0,
+      "unavailable": 0,
+      "other": 0
+    },
+    {
+      "from_second": 5,
+      "requests": 100,
+      "created": 60,
+      "refused": 40,
+      "unavailable": 0,
+      "other": 0
+    },
+    {
+      "from_second": 10,
+      "requests": 100,
+      "created": 50,
+      "refused": 50,
+      "unavailable": 0,
+      "other": 0
+    },
+    {
+      "from_second": 15,
+      "requests": 100,
+      "created": 90,
+      "refused": 10,
+      "unavailable": 0,
+      "other": 0
+    },
+    {
+      "from_second": 20,
+      "requests": 100,
+      "created": 50,
+      "refused": 50,
+      "unavailable": 0,
+      "other": 0
+    },
+    {
+      "from_second": 25,
+      "requests": 100,
+      "created": 50,
+      "refused": 50,
+      "unavailable": 0,
+      "other": 0
+    },
+    {
+      "from_second": 30,
+      "requests": 100,
+      "created": 2,
+      "refused": 2,
+      "unavailable": 96,
+      "other": 0
+    },
+    {
+      "from_second": 35,
+      "requests": 100,
+      "created": 0,
+      "refused": 0,
+      "unavailable": 100,
+      "other": 0
+    },
+    {
+      "from_second": 40,
+      "requests": 100,
+      "created": 0,
+      "refused": 0,
+      "unavailable": 100,
+      "other": 0
+    },
+    {
+      "from_second": 45,
+      "requests": 100,
+      "created": 0,
+      "refused": 0,
+      "unavailable": 100,
+      "other": 0
+    },
+    {
+      "from_second": 50,
+      "requests": 100,
+      "created": 12,
+      "refused": 13,
+      "unavailable": 75,
+      "other": 0
+    },
+    {
+      "from_second": 55,
+      "requests": 100,
+      "created": 50,
+      "refused": 50,
+      "unavailable": 0,
+      "other": 0
+    },
+    {
+      "from_second": 60,
+      "requests": 100,
+      "created": 50,
+      "refused": 50,
+      "unavailable": 0,
+      "other": 0
+    },
+    {
+      "from_second": 65,
+      "requests": 100,
+      "created": 50,
+      "refused": 50,
+      "unavailable": 0,
+      "other": 0
+    },
+    {
+      "from_second": 70,
+      "requests": 100,
+      "created": 50,
+      "refused": 50,
+      "unavailable": 0,
+      "other": 0
+    },
+    {
+      "from_second": 75,
+      "requests": 100,
+      "created": 50,
+      "refused": 50,
+      "unavailable": 0,
+      "other": 0
+    },
+    {
+      "from_second": 80,
+      "requests": 100,
+      "created": 50,
+      "refused": 50,
+      "unavailable": 0,
+      "other": 0
+    },
+    {
+      "from_second": 85,
+      "requests": 100,
+      "created": 50,
+      "refused": 50,
+      "unavailable": 0,
+      "other": 0
+    }
+  ],
+  "postgres": [
+    {
+      "decisions": 665,
+      "allowed": 100,
+      "daily_quota": 80,
+      "rate_limited": 485,
+      "daily_used": 100,
+      "passed_before": 0,
+      "passed_after": 180,
+      "limited_before": 0,
+      "limited_after": 485,
+      "passed_in_stop_minute": 0
+    },
+    {
+      "decisions": 664,
+      "allowed": 664,
+      "daily_quota": 0,
+      "rate_limited": 0,
+      "daily_used": 664,
+      "passed_before": 0,
+      "passed_after": 664,
+      "limited_before": 0,
+      "limited_after": 0,
+      "passed_in_stop_minute": 0
+    }
+  ],
+  "redis_windows": [
+    [
+      {
+        "start": "2026-10-12T21:24:00Z",
+        "passed": 60,
+        "limited": 100
+      },
+      {
+        "start": "2026-10-12T21:25:00Z",
+        "passed": 60,
+        "limited": 305
+      },
+      {
+        "start": "2026-10-12T21:26:00Z",
+        "passed": 60,
+        "limited": 80
+      }
+    ],
+    [
+      {
+        "start": "2026-10-12T21:24:00Z",
+        "passed": 160,
+        "limited": 0
+      },
+      {
+        "start": "2026-10-12T21:25:00Z",
+        "passed": 364,
+        "limited": 0
+      },
+      {
+        "start": "2026-10-12T21:26:00Z",
+        "passed": 140,
+        "limited": 0
+      }
+    ]
+  ],
+  "checks": [
+    {
+      "name": "every response was 201, a known 429 or 503",
+      "ok": true,
+      "detail": "0 other responses"
+    },
+    {
+      "name": "handler ran once per 201",
+      "ok": true,
+      "detail": "handler calls 764, 201 responses 764"
+    },
+    {
+      "name": "before the outage every request got a decision",
+      "ok": true,
+      "detail": "600 requests, 0 without a decision"
+    },
+    {
+      "name": "during the outage every request got 503 and the handler did not run",
+      "ok": true,
+      "detail": "392 requests sent +33.4s..+55.0s after the stop, 0 not 503; handler calls 402 then 402"
+    },
+    {
+      "name": "after recovery every request got a decision again",
+      "ok": true,
+      "detail": "626 requests sent from +58.6s, 0 without a decision, 313 allowed"
+    },
+    {
+      "name": "both copies allowed requests before and after the outage",
+      "ok": true,
+      "detail": "201s before: copy 1 200, copy 2 200; after: copy 1 157, copy 2 156"
+    },
+    {
+      "name": "basic customer: one PostgreSQL record per decided request",
+      "ok": true,
+      "detail": "records 665, decided responses 665, uncertain 503s 9"
+    },
+    {
+      "name": "basic customer: PostgreSQL records match responses",
+      "ok": true,
+      "detail": "allowed/daily/rate records 100/80/485, responses 100/80/485"
+    },
+    {
+      "name": "basic customer: daily usage equals allowed records",
+      "ok": true,
+      "detail": "daily usage 100, allowed 100"
+    },
+    {
+      "name": "basic customer: daily limit kept",
+      "ok": true,
+      "detail": "allowed 100 of 100; daily_quota records 80"
+    },
+    {
+      "name": "basic customer: every Redis window within the per-minute limit",
+      "ok": true,
+      "detail": "3 windows, most passed in one window 60, limit 60"
+    },
+    {
+      "name": "basic customer: Redis windows match PostgreSQL (whole run)",
+      "ok": true,
+      "detail": "Redis passed/limited 180/485, PostgreSQL 180/485, uncertain 503s 9"
+    },
+    {
+      "name": "pro customer: one PostgreSQL record per decided request",
+      "ok": true,
+      "detail": "records 664, decided responses 664, uncertain 503s 10"
+    },
+    {
+      "name": "pro customer: PostgreSQL records match responses",
+      "ok": true,
+      "detail": "allowed/daily/rate records 664/0/0, responses 664/0/0"
+    },
+    {
+      "name": "pro customer: daily usage equals allowed records",
+      "ok": true,
+      "detail": "daily usage 664, allowed 664"
+    },
+    {
+      "name": "pro customer: daily limit kept",
+      "ok": true,
+      "detail": "allowed 664 of 100000; daily_quota records 0"
+    },
+    {
+      "name": "pro customer: limits above its whole load, never refused",
+      "ok": true,
+      "detail": "900 requests; 429 responses 0, refusal records 0"
+    },
+    {
+      "name": "pro customer: every Redis window within the per-minute limit",
+      "ok": true,
+      "detail": "3 windows, most passed in one window 364, limit 1200"
+    },
+    {
+      "name": "pro customer: Redis windows match PostgreSQL (whole run)",
+      "ok": true,
+      "detail": "Redis passed/limited 664/0, PostgreSQL 664/0, uncertain 503s 10"
+    },
+    {
+      "name": "apps reconnected without a restart",
+      "ok": true,
+      "detail": "start time and restart count of api, api-2, example-api, example-api-2 unchanged"
+    },
+    {
+      "name": "no secret in the app logs",
+      "ok": true,
+      "detail": "admin token, database password and both API keys: 0 found"
+    }
+  ],
+  "cleanup": "removed; no container, volume, network or image of quotagate-qg13 left"
+}
